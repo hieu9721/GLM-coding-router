@@ -6,55 +6,45 @@ import { Errors, formatGlmError, GlmRouterError } from "../core/errors.js";
 import { isMainModule } from "../core/main-guard.js";
 import { logger, redact } from "../core/logging.js";
 import { applyProfile, extractProfileFlag } from "../core/profile.js";
-import { resolvePrompt } from "../core/prompt.js";
 import { spawnAgent } from "../core/process.js";
 import { resolveZaiApiKey } from "../core/zai-key.js";
 
-/** Worker tool surface (spec §16). */
-export const WORKER_TOOLS = "Read,Glob,Grep,Edit,Write,Bash";
-
-export function buildWorkerArgs(prompt: string, config: RouterConfig): string[] {
-  return [
-    "-p",
-    prompt,
-    "--max-turns",
-    String(config.worker.maxTurns),
-    "--permission-mode",
-    "acceptEdits",
-    "--tools",
-    WORKER_TOOLS,
-  ];
+/**
+ * Effective config for glm-fast: every model slot pinned to the fast model
+ * (specs/glm-fast-profiles.md). Applied AFTER the profile so a profile's
+ * `fast` model flows into all slots; a profile's `main` is overridden by design.
+ */
+export function fastModelConfig(config: RouterConfig): RouterConfig {
+  return { ...config, models: { main: config.models.fast, fast: config.models.fast } };
 }
 
 /**
- * glm-worker (spec §15, §16): headless implementation worker.
- * Prompt priority: stdin → arguments → error. Never uses
- * --dangerously-skip-permissions.
+ * glm-fast (spec §54, specs/glm-fast-profiles.md): interactive chat pinned to
+ * the fast model. Pass-through args like glm-chat; supports --profile.
  */
-export async function runWorker(argv: readonly string[]): Promise<number> {
+export async function runFast(argv: readonly string[]): Promise<number> {
   const { rest, profile } = extractProfileFlag(argv);
-  const prompt = await resolvePrompt(rest);
-  const config = applyProfile(loadConfig(), profile);
+  const config = fastModelConfig(applyProfile(loadConfig(), profile));
   const resolved = resolveZaiApiKey();
   if (!resolved) {
     throw Errors.zaiKeyMissing();
   }
   const claudePath = locateClaude(config);
 
-  const args = buildWorkerArgs(prompt, config);
   const env = createGlmEnv(config, resolved.key);
-  logger.debug(redact(`spawning ${claudePath} ${args.join(" ")}`, [resolved.key]));
+  logger.debug(`spawning ${claudePath}`);
+  logger.debug(redact(`env ANTHROPIC_BASE_URL=${env.ANTHROPIC_BASE_URL}`, [resolved.key]));
 
   return spawnAgent(claudePath, {
-    args,
+    args: [...rest],
     cwd: process.cwd(),
     env,
-    interactive: false,
+    interactive: true,
   });
 }
 
 if (isMainModule(import.meta.url)) {
-  runWorker(process.argv.slice(2)).then(
+  runFast(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (error) => {
       if (error instanceof GlmRouterError) {

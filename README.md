@@ -27,9 +27,9 @@ Claude / Codex → shell → glm-worker → claude.exe harness → Z.ai endpoint
                              │
              ┌───────────────┼───────────────┐
              ▼               ▼               ▼
-         glm-chat        glm-worker      glm-review
-             │               │               │
-             └───────────────┼───────────────┘
+    glm-chat  glm-fast  glm-worker  glm-review
+        │         │          │          │
+        └─────────┴──────────┴──────────┘
                         claude.exe
               (injected environment only)
                              │
@@ -67,6 +67,7 @@ After `glm-router init`:
 
 ```powershell
 glm-chat
+glm-fast
 glm-worker "Implement validation and add tests"
 glm-review "Analyze the auth module"
 ```
@@ -84,6 +85,18 @@ glm-chat --any-claude-flag
 ```
 
 Your normal `claude` command and its authentication are untouched.
+
+## glm-fast
+
+Interactive GLM-backed session pinned to the **fast model** (`models.fast`,
+`glm-5.3-flash` by default) — every model slot in the child environment maps to
+it, so whichever tier Claude Code picks, it gets the fast model. Same pass-through
+arguments as `glm-chat`:
+
+```powershell
+glm-fast
+glm-fast --profile air
+```
 
 ## glm-worker
 
@@ -122,6 +135,31 @@ glm-review "Inspect this repository"
 ```
 
 Runs with `--tools Read,Glob,Grep` — it cannot edit files or run commands.
+
+## Profiles
+
+All four task binaries (`glm-chat`, `glm-fast`, `glm-worker`, `glm-review`)
+accept `--profile <name>` to overlay saved model/maxTurns settings. Profiles
+live in `config.json`:
+
+```json
+{
+  "profiles": {
+    "test":     { "workerMaxTurns": 10, "fast": "glm-5.3-flash" },
+    "frontend": { "main": "glm-5.3", "reviewMaxTurns": 30 }
+  }
+}
+```
+
+```powershell
+glm-worker --profile test "Add failing test then fix it"
+glm-review --profile frontend "Review the component tree"
+```
+
+Fields (all optional): `main`, `fast`, `workerMaxTurns`, `reviewMaxTurns`.
+Unknown profile names fail with `ERROR [11]` listing the available ones.
+Note: `--profile` belongs to these wrappers — it shadows Claude Code's own
+`--profile` flag inside them.
 
 ## CLI reference
 
@@ -241,7 +279,7 @@ npm publish
 ```
 
 `prepublishOnly` runs build + tests. The package ships only `dist/`; the four binaries
-(`glm-router`, `glm-chat`, `glm-worker`, `glm-review`) are declared in `bin`.
+(`glm-router`, `glm-chat`, `glm-fast`, `glm-worker`, `glm-review`) are declared in `bin`.
 
 ## License
 

@@ -5,6 +5,7 @@ import { createGlmEnv } from "../core/env.js";
 import { Errors, formatGlmError, GlmRouterError } from "../core/errors.js";
 import { isMainModule } from "../core/main-guard.js";
 import { logger, redact } from "../core/logging.js";
+import { applyProfile, extractProfileFlag } from "../core/profile.js";
 import { spawnAgent } from "../core/process.js";
 import { resolveZaiApiKey } from "../core/zai-key.js";
 
@@ -13,7 +14,8 @@ import { resolveZaiApiKey } from "../core/zai-key.js";
  * spawn claude interactively with pass-through arguments.
  */
 export async function runChat(argv: readonly string[]): Promise<number> {
-  const config = loadConfig();
+  const { rest, profile } = extractProfileFlag(argv);
+  const config = applyProfile(loadConfig(), profile);
   const resolved = resolveZaiApiKey();
   if (!resolved) {
     throw Errors.zaiKeyMissing();
@@ -25,7 +27,7 @@ export async function runChat(argv: readonly string[]): Promise<number> {
   logger.debug(redact(`env ANTHROPIC_BASE_URL=${env.ANTHROPIC_BASE_URL}`, [resolved.key]));
 
   return spawnAgent(claudePath, {
-    args: [...argv],
+    args: [...rest],
     cwd: process.cwd(),
     env,
     interactive: true,

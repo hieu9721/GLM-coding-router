@@ -5,6 +5,7 @@ import { createGlmEnv } from "../core/env.js";
 import { Errors, formatGlmError, GlmRouterError } from "../core/errors.js";
 import { isMainModule } from "../core/main-guard.js";
 import { logger, redact } from "../core/logging.js";
+import { applyProfile, extractProfileFlag } from "../core/profile.js";
 import { readStdin, resolvePrompt } from "../core/prompt.js";
 import { spawnAgent } from "../core/process.js";
 import { resolveZaiApiKey } from "../core/zai-key.js";
@@ -21,8 +22,9 @@ export function buildReviewArgs(prompt: string, config: RouterConfig): string[] 
  * discovery, duplicate detection, dependency inspection, and review.
  */
 export async function runReview(argv: readonly string[]): Promise<number> {
-  const prompt = await resolvePrompt(argv, readStdin, "glm-review");
-  const config = loadConfig();
+  const { rest, profile } = extractProfileFlag(argv);
+  const prompt = await resolvePrompt(rest, readStdin, "glm-review");
+  const config = applyProfile(loadConfig(), profile);
   const resolved = resolveZaiApiKey();
   if (!resolved) {
     throw Errors.zaiKeyMissing();

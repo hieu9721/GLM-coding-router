@@ -6,7 +6,7 @@ between the two files. See "Scaling beyond v0.1" at the bottom before adding new
 
 ## Project purpose
 
-npm CLI (`glm-coding-router`, CLI name `glm-router`) that lets Claude Code and Codex act as orchestrators while GLM Coding Plan (via Z.ai's Anthropic-compatible endpoint `https://api.z.ai/api/anthropic`) does implementation work. Provides four binaries: `glm-router`, `glm-chat`, `glm-worker`, `glm-review`.
+npm CLI (`glm-coding-router`, CLI name `glm-router`) that lets Claude Code and Codex act as orchestrators while GLM Coding Plan (via Z.ai's Anthropic-compatible endpoint `https://api.z.ai/api/anthropic`) does implementation work. Provides five binaries: `glm-router`, `glm-chat`, `glm-fast`, `glm-worker`, `glm-review`.
 
 - v0.1 targets **Windows 10/11 only**, Node >= 20, TypeScript, ESM, distributed via npm.
 - The authoritative source is `GLM Coding Router — Technical Specification v0.1.md` — read the relevant sections before changing behavior. The spec is bilingual (Vietnamese/English); section numbers referenced here come from it.
@@ -27,15 +27,17 @@ Claude Code / Codex → shell command → glm-chat / glm-worker / glm-review →
 - `src/cli.ts` — main CLI entry (`glm-router`), built with commander. Each subcommand
   (`init`, `doctor`, `status`, `key`, `config`, `project`, `skill`, `uninstall`) lives in
   `src/commands/` and is wired here.
-- `src/bin/{glm-chat,glm-worker,glm-review}.ts` — the three thin binaries that resolve the Z.ai
-  key, locate `claude.exe`, build the injected env, and spawn the child process. `glm-chat` is
-  interactive; `glm-worker` runs with `--tools Read,Glob,Grep,Edit,Write,Bash`; `glm-review` is
-  read-only with `--tools Read,Glob,Grep`.
+- `src/bin/{glm-chat,glm-fast,glm-worker,glm-review}.ts` — the four thin task binaries that
+  resolve the Z.ai key, locate `claude.exe`, build the injected env, and spawn the child process.
+  `glm-chat` is interactive; `glm-fast` is interactive pinned to the fast model; `glm-worker`
+  runs with `--tools Read,Glob,Grep,Edit,Write,Bash`; `glm-review` is read-only with
+  `--tools Read,Glob,Grep`. All four accept `--profile <name>` (see `specs/glm-fast-profiles.md`).
 - `src/core/` — shared runtime: `config.ts` (zod-validated config), `paths.ts`, `zai-key.ts` (key
   resolution), `claude.ts` (`locateClaude`/`locateCodex` discovery), `env.ts` (`createGlmEnv`,
   the child-only environment), `process.ts` (`spawnAgent`), `prompt.ts` (stdin/args resolution),
-  `platform.ts`, `errors.ts` (`GlmRouterError`, `ExitCode`, `Errors` factory), `logging.ts`
-  (`redact`), `main-guard.ts` (`isMainModule`), `version.ts`.
+  `profile.ts` (`extractProfileFlag`/`applyProfile`), `platform.ts`, `errors.ts`
+  (`GlmRouterError`, `ExitCode`, `Errors` factory), `logging.ts` (`redact`), `main-guard.ts`
+  (`isMainModule`), `version.ts`.
 - `src/integrations/` — `claude.ts` and `codex.ts` wire the managed-block engine into each tool's
   instruction file; `skill.ts` installs/removes the Codex `glm-delegation` skill.
 - `src/project/` — the managed-block engine: `managed-block.ts` (parse/insert/replace between

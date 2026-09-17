@@ -8,6 +8,16 @@ export const DEFAULT_ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic";
 export const DEFAULT_MAIN_MODEL = "glm-5.3";
 export const DEFAULT_FAST_MODEL = "glm-5.3-flash";
 
+/** Named model/maxTurns overlay selected via --profile (specs/glm-fast-profiles.md). */
+export const ProfileSchema = z.object({
+  main: z.string().min(1).optional(),
+  fast: z.string().min(1).optional(),
+  workerMaxTurns: z.number().int().positive().optional(),
+  reviewMaxTurns: z.number().int().positive().optional(),
+});
+
+export type ProfileConfig = z.infer<typeof ProfileSchema>;
+
 export const ConfigSchema = z.object({
   schemaVersion: z.literal(1),
 
@@ -38,6 +48,9 @@ export const ConfigSchema = z.object({
   // Optional executable overrides used by discovery (spec §33, §34).
   claudePath: z.string().min(1).optional(),
   codexPath: z.string().min(1).optional(),
+
+  // Named overlays selected via --profile (specs/glm-fast-profiles.md).
+  profiles: z.record(z.string(), ProfileSchema).default({}),
 });
 
 export type RouterConfig = z.infer<typeof ConfigSchema>;
@@ -60,6 +73,7 @@ export function defaultConfig(): RouterConfig {
       codex: true,
       codexSkill: true,
     },
+    profiles: {},
   };
 }
 

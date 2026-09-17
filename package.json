@@ -1,6 +1,6 @@
 {
   "name": "glm-coding-router",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "GLM Coding Plan workers for Claude Code and Codex",
   "type": "module",
   "license": "MIT",
@@ -13,7 +13,8 @@
     "glm-router": "./dist/cli.js",
     "glm-chat": "./dist/bin/glm-chat.js",
     "glm-worker": "./dist/bin/glm-worker.js",
-    "glm-review": "./dist/bin/glm-review.js"
+    "glm-review": "./dist/bin/glm-review.js",
+    "glm-fast": "./dist/bin/glm-fast.js"
   },
   "files": [
     "dist"
