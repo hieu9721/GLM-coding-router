@@ -50,9 +50,16 @@ export interface DoctorReport {
 }
 
 /** All doctor checks (spec §9). Read-only; never exposes the key value. */
-export function runDoctorChecks(options: { home?: string } = {}): DoctorReport {
+export function runDoctorChecks(
+  options: {
+    home?: string;
+    env?: NodeJS.ProcessEnv;
+    readUserEnv?: (name: string) => string | undefined;
+  } = {},
+): DoctorReport {
   const results: CheckResult[] = [];
   const home = options.home ?? os.homedir();
+  const env = options.env ?? process.env;
 
   // --- System ---
   results.push(
@@ -100,14 +107,14 @@ export function runDoctorChecks(options: { home?: string } = {}): DoctorReport {
 
   // --- Agents ---
   try {
-    const claudePath = locateClaude(config);
+    const claudePath = locateClaude(config, env);
     results.push(check("Agents", "Claude Code", "ok", claudePath));
   } catch (error) {
     results.push(
       check("Agents", "Claude Code", "fail", error instanceof Error ? error.message : String(error)),
     );
   }
-  const codexPath = locateCodex(config);
+  const codexPath = locateCodex(config, env);
   results.push(
     check(
       "Agents",
@@ -119,7 +126,7 @@ export function runDoctorChecks(options: { home?: string } = {}): DoctorReport {
   );
 
   // --- Z.ai key ---
-  const resolved = resolveZaiApiKey();
+  const resolved = resolveZaiApiKey({ env, readUserEnv: options.readUserEnv });
   results.push(
     check(
       "Z.ai",
@@ -179,7 +186,7 @@ export function runDoctorChecks(options: { home?: string } = {}): DoctorReport {
   );
 
   // --- Environment: the Orca stale-env case (spec §9, §10) ---
-  const hasProcessKey = Boolean(process.env.ZAI_API_KEY && process.env.ZAI_API_KEY.trim());
+  const hasProcessKey = Boolean(env.ZAI_API_KEY && env.ZAI_API_KEY.trim());
   if (hasProcessKey) {
     results.push(
       check("Environment", "Process environment", "ok", "ZAI_API_KEY visible in current process"),

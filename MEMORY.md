@@ -27,17 +27,19 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
 | stdin works | ✓ tested (stdin → args → error priority) |
 | `project init` idempotent | ✓ tested (second run is a no-op) |
 | `project remove` safe | ✓ tested (preserves user content, deletes only router-owned empties) |
-| `doctor` works | ⚠ implemented — no test coverage |
+| `doctor` works | ⚠ its Agents/Z.ai key logic is tested in isolation (`tests/integration/doctor.test.ts`); the command's own text/JSON rendering and the System/Commands/Codex-skill sections aren't |
 | `status` works | ⚠ implemented — no test coverage |
 | `uninstall` works | ⚠ implemented — no test coverage |
 | Secrets never logged | ✓ tested (`redact()`) |
-| Unit tests pass | ✓ 80/80, 7 files (confirmed 2026-09-17) |
+| Unit tests pass | ✓ 85/85, 8 files (confirmed 2026-09-17) |
 | Integration tests pass | ✓ same run, fake-agent based |
 | README complete | ✓ covers every §52 section |
 
 **Known gaps** (not blocking, but real before calling v0.1 done beyond "code complete"):
-- No command-level test for `doctor`, `status`, `init` (wizard), `uninstall`, `key`, `config` —
-  only the primitives underneath them are tested.
+- No command-level test for `status`, `init` (wizard), `uninstall`, `key`, `config` — only the
+  primitives underneath them (and, for `doctor`, its check logic) are tested. The wizard-style
+  commands (`init`, `key set`, `uninstall`) use the `prompts` library interactively, which needs
+  its own injection point before it's testable the same way.
 - §50 acceptance criteria (fresh Windows machine, real `claude.exe`, real Z.ai key, end-to-end
   `glm-chat`/`glm-worker`/`glm-review`) has not been run.
 - §49 Windows test matrix (Win10 vs 11, PowerShell 5.1 vs 7.x, Orca embedded terminal) unverified.
@@ -49,6 +51,7 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
 |---|---|---|
 | 2026-09-17 | Set `CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1` in the child env (`src/core/env.ts`) | GLM models aren't in Claude Code's model catalog, so it was enforcing an incorrect 200k context window on them |
 | 2026-09-17 | `locateClaude`/`locateCodex`/`codexRequired` now take an optional trailing `env` param (default `process.env`), threaded into `where.exe`/`which` and `searchPathFor` | Lets tests fully replace `PATH` to isolate discovery from whatever is actually installed on the machine running the tests, without mocking modules — matches the project's existing "real fs/temp-dir, no `vi.mock`" test style |
+| 2026-09-17 | `runDoctorChecks()` now also takes optional `env` and `readUserEnv`, threaded into `locateClaude`/`locateCodex`/`resolveZaiApiKey` and the process-key check | Same reasoning as above, applied to `doctor` — it was the only remaining caller of these primitives still hardcoded to the real environment |
 
 ## Constraints discovered
 
@@ -65,3 +68,4 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
 | 2026-09-17 | Scaffolded and implemented the full v0.1 CLI (core runtime, commands, tests, docs) | `ef60a43`..`ede6919` |
 | 2026-09-17 | Loaded the spec's Definition of Done (§51) against actual code + a real build/test/lint run; recorded gap list above | — |
 | 2026-09-17 | Closed the `locateClaude`/`locateCodex` discovery-order test gap: refactored for env injection, added `tests/unit/claude-discovery.test.ts` (12 tests) | `a274def`.. |
+| 2026-09-17 | Extended the same env-injection technique to `doctor`; added `tests/integration/doctor.test.ts` (5 tests) covering Agents + Z.ai key logic | — |
