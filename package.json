@@ -1,0 +1,46 @@
+{
+  "name": "glm-coding-router",
+  "version": "0.1.0",
+  "description": "GLM Coding Plan workers for Claude Code and Codex",
+  "type": "module",
+  "license": "MIT",
+  "author": "hieu9721",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hieu9721/GLM-coding-router.git"
+  },
+  "bin": {
+    "glm-router": "./dist/cli.js",
+    "glm-chat": "./dist/bin/glm-chat.js",
+    "glm-worker": "./dist/bin/glm-worker.js",
+    "glm-review": "./dist/bin/glm-review.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src tests",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "commander": "^15.0.0",
+    "prompts": "^2.4.2",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.3",
+    "@types/prompts": "^2.4.9",
+    "eslint": "^9.39.5",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.0",
+    "vitest": "^5.0.1"
+  }
+}
