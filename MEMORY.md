@@ -15,7 +15,7 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
 
 | Item (§51) | Status |
 |---|---|
-| Package installs globally | ⚠ tarball verified: `npm pack` → installed into a clean temp prefix → `doctor` HEALTHY, `glm-chat --version` and `glm-worker "WORKER_OK"` both ran from the fresh shims (2026-09-17). Still never installed from the npm registry on a fresh machine (not yet published) |
+| Package installs globally | ✓ `0.1.1` published to npm (2026-09-17T14:43Z, user ran the 2FA-gated publish manually). Verified from the registry: installed into a clean temp prefix → `doctor` HEALTHY, dry-run fix present, `glm-worker` returned `REGISTRY_OK`; machine's own global install now tracks the registry. Fresh-machine install (§50) still untested — everything so far is this one machine |
 | Four CLI binaries work | ✓ implemented, exercised via `tests/fixtures/fake-agent.mjs` |
 | ZAI key setup works | ✓ `key set`/`key check`/`key remove` tested end to end (`tests/integration/key-command.test.ts`) via injected `prompt`/`setEnv`/`deleteEnv` — real key set once manually via `glm-router key set` earlier in the project's life, real machine confirms `doctor`/`status` see it |
 | Stale Orca environment handled | ✓ `resolveZaiApiKey()` unit-tested (process env → Windows User Env → fail) |
@@ -36,21 +36,15 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
 | README complete | ✓ covers every §52 section |
 
 **Known gaps** (not blocking, but real before calling v0.1 done beyond "code complete"):
-- **npm publish status**: `0.1.0` was published by the user at 2026-09-17T10:13Z from a **stale
-  build** — its tarball predates the last 5 commits (all DI refactors, the `doctor --network
-  --json` probe bug fix, the dry-run "already up to date" fix). Registry versions are immutable,
-  so the fix path is `0.1.1`: version bumped and committed, publish left to the user manually
-  (account has 2FA — agent runs hit EOTP). After publish: verify `npm view glm-coding-router`
-  shows 0.1.1, install from the registry into a clean prefix, re-run the §50 checks.
-- §50 acceptance criteria: run for real on *this* machine (not a fresh one) on 2026-09-17 —
-  `doctor`/`doctor --network`/`status` HEALTHY with the real endpoint reachable, `glm-worker`
-  returned `WORKER_OK`, `glm-review` confirmed it has no write-capable tool and created nothing,
-  `project init --dry-run` reported the (already-installed) managed blocks without touching the
-  files (verified via checksum before/after). Same day, the packaged tarball (`npm pack`) was
-  installed into a clean temp prefix and re-verified: `doctor` HEALTHY, `glm-chat --version`,
-  `glm-worker "WORKER_OK"` all worked from the fresh shims. Not yet run on an actual **fresh**
-  Windows machine with `npm install -g glm-coding-router` from the registry — that part of §50
-  is still open (blocked on publishing).
+- **npm publish**: done — `0.1.1` is live and tagged `latest` (published 2026-09-17T14:43Z by the
+  user; account 2FA blocks agent-run publish, hence manual). Note `0.1.0` on the registry is a
+  stale build missing the last 5 commits — anyone hitting it should move to `0.1.1`.
+- §50 acceptance criteria: everything verified on *this* machine (2026-09-17) — `doctor`/
+  `doctor --network`/`status` HEALTHY with the real endpoint reachable, `glm-worker` returned
+  `WORKER_OK` (and later `REGISTRY_OK` from the registry install), `glm-review` confirmed it has
+  no write-capable tool and created nothing, `project init --dry-run` reports "already up to
+  date" on installed blocks without touching files. Registry install verified into a clean
+  prefix too. Still open: run the same suite on an actual **fresh** Windows machine.
 - §49 Windows test matrix (Win10 vs 11, PowerShell 5.1 vs 7.x, Orca embedded terminal) unverified.
 
 ## Decisions made outside the spec
@@ -85,4 +79,5 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
 | 2026-09-17 | Delegated the `init`/`uninstall`/`key`/`config` DI refactor + 4 new test files to `glm-worker` (6 dispatches, see decision above); reviewed every diff and re-ran build/test/lint myself before accepting each one. Also ran real acceptance checks with the actually-installed `glm-router` on this machine (`doctor`, `doctor --network`, `status`, `glm-worker`, `glm-review`, `project init --dry-run`) — all matched spec. 101 tests, 13 files, all green | `01dc8c4` |
 | 2026-09-17 | Closed the last doctor test gap (spec §42 network probe + JSON/text rendering): added DI to `doctorCommand`/`probeEndpoint`, wrote `tests/integration/doctor-command.test.ts` (10 tests), fixed a real bug where `--network --json` skipped the probe entirely. 111 tests, 14 files, all green; build/lint clean | `41f45b9` |
 | 2026-09-17 | Fresh-install simulation: `npm pack` → installed the tarball into a clean temp global prefix → all four binaries verified from the fresh shims (`doctor` HEALTHY, `glm-chat --version`, `glm-worker "WORKER_OK"`); closes the local half of §50's install criterion. Fixed the dry-run nit: `projectInitCommand` now takes `{root, home}` deps and reports "already up to date" when the managed block is unchanged (`tests/integration/project-init-command.test.ts`, 3 tests). Refreshed the machine's global `glm-router` via `npm install -g .` so live checks use current code. 114 tests, 15 files, all green | `f214f5f` |
-| 2026-09-17 | Discovered registry 0.1.0 (user-published 10:13Z) is a stale build missing the last 5 commits incl. the `doctor --network --json` bug fix. Bumped to 0.1.1 and attempted publish — blocked by account 2FA (EOTP); user will publish manually | pending |
+| 2026-09-17 | Discovered registry 0.1.0 (user-published 10:13Z) is a stale build missing the last 5 commits incl. the `doctor --network --json` bug fix. Bumped to 0.1.1 and attempted publish — blocked by account 2FA (EOTP); user will publish manually | `debec0a` |
+| 2026-09-17 | User published 0.1.1 (14:43Z, latest). Verified from the registry into a clean prefix: `doctor` HEALTHY, dry-run fix present, `glm-worker` → `REGISTRY_OK`; switched this machine's global install to the registry version. v0.1 is now published; remaining: fresh-machine §50 run and §49 matrix | — |
