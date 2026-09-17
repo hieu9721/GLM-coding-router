@@ -36,6 +36,12 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
 | README complete | ✓ covers every §52 section |
 
 **Known gaps** (not blocking, but real before calling v0.1 done beyond "code complete"):
+- **npm publish status**: `0.1.0` was published by the user at 2026-09-17T10:13Z from a **stale
+  build** — its tarball predates the last 5 commits (all DI refactors, the `doctor --network
+  --json` probe bug fix, the dry-run "already up to date" fix). Registry versions are immutable,
+  so the fix path is `0.1.1`: version bumped and committed, publish left to the user manually
+  (account has 2FA — agent runs hit EOTP). After publish: verify `npm view glm-coding-router`
+  shows 0.1.1, install from the registry into a clean prefix, re-run the §50 checks.
 - §50 acceptance criteria: run for real on *this* machine (not a fresh one) on 2026-09-17 —
   `doctor`/`doctor --network`/`status` HEALTHY with the real endpoint reachable, `glm-worker`
   returned `WORKER_OK`, `glm-review` confirmed it has no write-capable tool and created nothing,
@@ -46,7 +52,6 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
   Windows machine with `npm install -g glm-coding-router` from the registry — that part of §50
   is still open (blocked on publishing).
 - §49 Windows test matrix (Win10 vs 11, PowerShell 5.1 vs 7.x, Orca embedded terminal) unverified.
-- Not yet published to npm.
 
 ## Decisions made outside the spec
 
@@ -80,3 +85,4 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
 | 2026-09-17 | Delegated the `init`/`uninstall`/`key`/`config` DI refactor + 4 new test files to `glm-worker` (6 dispatches, see decision above); reviewed every diff and re-ran build/test/lint myself before accepting each one. Also ran real acceptance checks with the actually-installed `glm-router` on this machine (`doctor`, `doctor --network`, `status`, `glm-worker`, `glm-review`, `project init --dry-run`) — all matched spec. 101 tests, 13 files, all green | `01dc8c4` |
 | 2026-09-17 | Closed the last doctor test gap (spec §42 network probe + JSON/text rendering): added DI to `doctorCommand`/`probeEndpoint`, wrote `tests/integration/doctor-command.test.ts` (10 tests), fixed a real bug where `--network --json` skipped the probe entirely. 111 tests, 14 files, all green; build/lint clean | `41f45b9` |
 | 2026-09-17 | Fresh-install simulation: `npm pack` → installed the tarball into a clean temp global prefix → all four binaries verified from the fresh shims (`doctor` HEALTHY, `glm-chat --version`, `glm-worker "WORKER_OK"`); closes the local half of §50's install criterion. Fixed the dry-run nit: `projectInitCommand` now takes `{root, home}` deps and reports "already up to date" when the managed block is unchanged (`tests/integration/project-init-command.test.ts`, 3 tests). Refreshed the machine's global `glm-router` via `npm install -g .` so live checks use current code. 114 tests, 15 files, all green | `f214f5f` |
+| 2026-09-17 | Discovered registry 0.1.0 (user-published 10:13Z) is a stale build missing the last 5 commits incl. the `doctor --network --json` bug fix. Bumped to 0.1.1 and attempted publish — blocked by account 2FA (EOTP); user will publish manually | pending |
