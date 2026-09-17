@@ -15,13 +15,13 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
 
 | Item (§51) | Status |
 |---|---|
-| Package installs globally | ⚠ bin config correct, build clean — not yet published, never installed on a fresh machine |
+| Package installs globally | ⚠ tarball verified: `npm pack` → installed into a clean temp prefix → `doctor` HEALTHY, `glm-chat --version` and `glm-worker "WORKER_OK"` both ran from the fresh shims (2026-09-17). Still never installed from the npm registry on a fresh machine (not yet published) |
 | Four CLI binaries work | ✓ implemented, exercised via `tests/fixtures/fake-agent.mjs` |
 | ZAI key setup works | ✓ `key set`/`key check`/`key remove` tested end to end (`tests/integration/key-command.test.ts`) via injected `prompt`/`setEnv`/`deleteEnv` — real key set once manually via `glm-router key set` earlier in the project's life, real machine confirms `doctor`/`status` see it |
 | Stale Orca environment handled | ✓ `resolveZaiApiKey()` unit-tested (process env → Windows User Env → fail) |
 | Claude detection works | ✓ `locateClaude()` — discovery order (where.exe → PATH → override → error) unit-tested with an isolated PATH (`tests/unit/claude-discovery.test.ts`) |
 | Codex detection works | ✓ `locateCodex()`/`codexRequired()` — same test file, same isolation technique |
-| Interactive GLM works (`glm-chat`) | ⚠ unit-tested; `glm-chat --version` not separately re-verified live this session, but `glm-worker`/`glm-review` (same underlying spawn path) were — see below |
+| Interactive GLM works (`glm-chat`) | ✓ unit-tested; `glm-chat --version` run live from the fresh-prefix install — printed `2.1.274 (Claude Code)`, confirming the interactive spawn path (2026-09-17) |
 | Worker GLM works | ✓ integration-tested, **and run for real**: `glm-worker "Reply exactly with WORKER_OK"` on this machine returned exactly `WORKER_OK`, exit 0 (2026-09-17) |
 | Read-only GLM works | ✓ integration-tested, **and run for real**: asked `glm-review` to create a file — it reported it has no Write/Edit/Bash tool available and the file was confirmed absent afterward (2026-09-17) |
 | stdin works | ✓ tested (stdin → args → error priority) |
@@ -31,7 +31,7 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
 | `status` works | ✓ tested end to end (JSON + text), **and run for real** — `glm-router status` matches the real machine's state |
 | `uninstall` works | ✓ tested end to end (`tests/integration/uninstall-command.test.ts`) — config removal, key-kept-by-default, and managed-block stripping via `deps.root`; the interactive "remove key" wizard path is untestable without mutating real stdin, documented as skipped in the test file |
 | Secrets never logged | ✓ tested (`redact()`); `status` also asserted to never print the key value |
-| Unit tests pass | ✓ 101/101, 13 files (confirmed 2026-09-17) |
+| Unit tests pass | ✓ 114/114, 15 files (confirmed 2026-09-17) |
 | Integration tests pass | ✓ same run, fake-agent based |
 | README complete | ✓ covers every §52 section |
 
@@ -40,12 +40,11 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
   `doctor`/`doctor --network`/`status` HEALTHY with the real endpoint reachable, `glm-worker`
   returned `WORKER_OK`, `glm-review` confirmed it has no write-capable tool and created nothing,
   `project init --dry-run` reported the (already-installed) managed blocks without touching the
-  files (verified via checksum before/after). Not yet run on an actual **fresh** Windows machine
-  with a fresh `npm install -g` — that part of §50 is still open.
-- Minor UX nit found while doing the above: `project init --dry-run`'s diff always renders a
-  full remove+reinsert of the managed block even when the content is byte-identical (confirmed
-  via checksum — the real file is untouched, this is only a cosmetic "would update" wording
-  issue in the diff renderer, not a correctness bug). Not fixed; low priority.
+  files (verified via checksum before/after). Same day, the packaged tarball (`npm pack`) was
+  installed into a clean temp prefix and re-verified: `doctor` HEALTHY, `glm-chat --version`,
+  `glm-worker "WORKER_OK"` all worked from the fresh shims. Not yet run on an actual **fresh**
+  Windows machine with `npm install -g glm-coding-router` from the registry — that part of §50
+  is still open (blocked on publishing).
 - §49 Windows test matrix (Win10 vs 11, PowerShell 5.1 vs 7.x, Orca embedded terminal) unverified.
 - Not yet published to npm.
 
@@ -79,4 +78,5 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
 | 2026-09-17 | Extended the same env-injection technique to `doctor`; added `tests/integration/doctor.test.ts` (5 tests) covering Agents + Z.ai key logic | — |
 | 2026-09-17 | Extended it again to `status`; added `tests/integration/status.test.ts` (4 tests, JSON + text output, secret-never-printed) | — |
 | 2026-09-17 | Delegated the `init`/`uninstall`/`key`/`config` DI refactor + 4 new test files to `glm-worker` (6 dispatches, see decision above); reviewed every diff and re-ran build/test/lint myself before accepting each one. Also ran real acceptance checks with the actually-installed `glm-router` on this machine (`doctor`, `doctor --network`, `status`, `glm-worker`, `glm-review`, `project init --dry-run`) — all matched spec. 101 tests, 13 files, all green | `01dc8c4` |
-| 2026-09-17 | Closed the last doctor test gap (spec §42 network probe + JSON/text rendering): added DI to `doctorCommand`/`probeEndpoint`, wrote `tests/integration/doctor-command.test.ts` (10 tests), fixed a real bug where `--network --json` skipped the probe entirely. 111 tests, 14 files, all green; build/lint clean | pending |
+| 2026-09-17 | Closed the last doctor test gap (spec §42 network probe + JSON/text rendering): added DI to `doctorCommand`/`probeEndpoint`, wrote `tests/integration/doctor-command.test.ts` (10 tests), fixed a real bug where `--network --json` skipped the probe entirely. 111 tests, 14 files, all green; build/lint clean | `41f45b9` |
+| 2026-09-17 | Fresh-install simulation: `npm pack` → installed the tarball into a clean temp global prefix → all four binaries verified from the fresh shims (`doctor` HEALTHY, `glm-chat --version`, `glm-worker "WORKER_OK"`); closes the local half of §50's install criterion. Fixed the dry-run nit: `projectInitCommand` now takes `{root, home}` deps and reports "already up to date" when the managed block is unchanged (`tests/integration/project-init-command.test.ts`, 3 tests). Refreshed the machine's global `glm-router` via `npm install -g .` so live checks use current code. 114 tests, 15 files, all green | `f214f5f` |
