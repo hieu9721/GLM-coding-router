@@ -35,9 +35,9 @@ function renderText(results: readonly CheckResult[], networkResult?: string): st
 }
 
 /** Lightweight endpoint reachability probe (spec §42). Never consumes coding quota. */
-export async function probeEndpoint(baseUrl: string): Promise<string> {
+export async function probeEndpoint(baseUrl: string, fetchImpl: typeof fetch = fetch): Promise<string> {
   try {
-    const response = await fetch(baseUrl, {
+    const response = await fetchImpl(baseUrl, {
       method: "GET",
       signal: AbortSignal.timeout(10_000),
     });
@@ -48,20 +48,34 @@ export async function probeEndpoint(baseUrl: string): Promise<string> {
   }
 }
 
-export async function doctorCommand(options: GlobalOptions & { network?: boolean }): Promise<number> {
-  const report = runDoctorChecks();
+export interface DoctorCommandDeps {
+  readonly home?: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly readUserEnv?: (name: string) => string | undefined;
+  readonly fetchImpl?: typeof fetch;
+}
+
+export async function doctorCommand(
+  options: GlobalOptions & { network?: boolean },
+  deps: DoctorCommandDeps = {},
+): Promise<number> {
+  const report = runDoctorChecks({ home: deps.home, env: deps.env, readUserEnv: deps.readUserEnv });
 
   if (options.json) {
+    const networkResult = options.network
+      ? await probeEndpoint(report.config.provider.anthropicBaseUrl, deps.fetchImpl)
+      : undefined;
     emitJson({
       status: doctorHasFailures(report.results) ? "ISSUES" : "HEALTHY",
       checks: report.results,
       keySource: report.keySource,
+      network: networkResult,
     });
     return doctorHasFailures(report.results) ? 1 : 0;
   }
 
   const networkResult = options.network
-    ? await probeEndpoint(report.config.provider.anthropicBaseUrl)
+    ? await probeEndpoint(report.config.provider.anthropicBaseUrl, deps.fetchImpl)
     : undefined;
   process.stdout.write(renderText(report.results, networkResult) + "\n");
   logger.debug(`anthropic base url: ${report.config.provider.anthropicBaseUrl}`);
