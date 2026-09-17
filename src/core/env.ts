@@ -22,5 +22,8 @@ export function createGlmEnv(
     ANTHROPIC_DEFAULT_OPUS_MODEL: config.models.main,
     ANTHROPIC_DEFAULT_SONNET_MODEL: config.models.main,
     ANTHROPIC_DEFAULT_HAIKU_MODEL: config.models.fast,
+    // GLM models are not in Claude Code's model catalog; without this it
+    // enforces its assumed 200k context window on unknown models.
+    CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT: "1",
   };
 }
