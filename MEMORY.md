@@ -45,7 +45,10 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
   no write-capable tool and created nothing, `project init --dry-run` reports "already up to
   date" on installed blocks without touching files. Registry install verified into a clean
   prefix too. Still open: run the same suite on an actual **fresh** Windows machine.
-- §49 Windows test matrix (Win10 vs 11, PowerShell 5.1 vs 7.x, Orca embedded terminal) unverified.
+- §49 Windows test matrix: PowerShell axis verified as far as this machine allows — the code
+  always spawns `powershell.exe` (5.1) for key resolution regardless of parent shell, and
+  `glm-router key check` was run from a PowerShell 7.6 parent successfully. Still open: real
+  Win10 machine, Orca embedded terminal.
 
 ## Decisions made outside the spec
 
