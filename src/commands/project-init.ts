@@ -33,16 +33,19 @@ export function renderChangeDiff(change: ManagedFileChange): string {
  * CLAUDE.md and AGENTS.md at the project root. Idempotent; never overwrites
  * user content; supports --dry-run.
  */
-export function projectInitCommand(options: GlobalOptions): number {
-  const root = findProjectRoot();
-  const config = loadConfig();
+export function projectInitCommand(
+  options: GlobalOptions,
+  deps: { root?: string; home?: string } = {},
+): number {
+  const root = deps.root ?? findProjectRoot();
+  const config = loadConfig(deps.home);
   const changes: ManagedFileChange[] = [];
 
   if (config.integrations.claude) {
-    changes.push(installClaudeIntegration(root, { dryRun: options.dryRun }));
+    changes.push(installClaudeIntegration(root, { home: deps.home, dryRun: options.dryRun }));
   }
   if (config.integrations.codex) {
-    changes.push(installCodexIntegration(root, { dryRun: options.dryRun }));
+    changes.push(installCodexIntegration(root, { home: deps.home, dryRun: options.dryRun }));
   }
 
   if (changes.length === 0) {
@@ -52,7 +55,11 @@ export function projectInitCommand(options: GlobalOptions): number {
 
   for (const change of changes) {
     if (options.dryRun) {
-      process.stdout.write(`[dry-run] would update ${change.file}:\n${renderChangeDiff(change)}\n`);
+      if (change.changed) {
+        process.stdout.write(`[dry-run] would update ${change.file}:\n${renderChangeDiff(change)}\n`);
+      } else {
+        process.stdout.write(`[dry-run] ${change.file} — already up to date\n`);
+      }
     } else if (!change.changed) {
       process.stdout.write(`✓ ${change.file} — already up to date\n`);
     } else if (change.created) {
