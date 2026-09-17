@@ -5,33 +5,33 @@
 npm CLI (`glm-coding-router`, CLI name `glm-router`) that lets Claude Code and Codex act as orchestrators while GLM Coding Plan (via Z.ai's Anthropic-compatible endpoint `https://api.z.ai/api/anthropic`) does implementation work. Provides four binaries: `glm-router`, `glm-chat`, `glm-worker`, `glm-review`.
 
 - v0.1 targets **Windows 10/11 only**, Node >= 20, TypeScript, ESM, distributed via npm.
-- **This repo is currently spec-only.** The authoritative source is `GLM Coding Router — Technical Specification v0.1.md` — read the relevant sections before implementing anything. The spec is bilingual (Vietnamese/English); section numbers below refer to it.
+- The authoritative source is `GLM Coding Router — Technical Specification v0.1.md` — read the relevant sections before changing behavior. The spec is bilingual (Vietnamese/English); section numbers referenced here come from it.
 
-## Planned structure (spec §30)
+## Structure (spec §30)
 
 ```
 src/cli.ts            # main CLI entry (bin: glm-router)
 src/bin/              # glm-chat.ts, glm-worker.ts, glm-review.ts
-src/commands/         # init, doctor, status, uninstall, config, key, project-*
-src/core/             # config, paths, zai-key, claude discovery, process spawn, platform
-src/integrations/     # claude.ts, codex.ts, skill.ts
-src/project/          # managed-block.ts, project-root.ts, atomic-write.ts
+src/commands/         # init, doctor(+doctor-command), status, uninstall, config, key, project-*, skill, context
+src/core/             # config, paths, zai-key, claude discovery, env, process spawn, prompt, platform, errors, logging, main-guard, version
+src/integrations/     # claude.ts, codex.ts, skill.ts (CodexSkillInstaller)
+src/project/          # managed-block.ts, managed-file.ts, project-root.ts, atomic-write.ts, ownership.ts
 src/templates/        # managed-block content + glm-delegation SKILL.md
 tests/{unit,integration,fixtures}
 ```
 
-## Build & test (spec §31)
+ESM with NodeNext resolution: relative imports in `src/` **must** use the `.js` suffix.
 
-No package.json yet; use these scripts when creating it:
+## Build & test
 
 ```
-npm run dev      # tsx src/cli.ts
-npm run build    # tsc
+npm run build    # tsc → dist/
 npm test         # vitest run
 npm run lint     # eslint src tests
+npm run dev      # tsx src/cli.ts <args>
 ```
 
-Deps: commander, prompts, zod; dev: typescript, tsx, vitest, eslint, @types/node.
+Integration tests spawn `tests/fixtures/fake-agent.mjs` through `node.exe` to verify args/env/exit codes without API quota — extend that fixture rather than calling real GLM.
 
 ## Hard rules
 
