@@ -15,7 +15,7 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
 
 | Item (§51) | Status |
 |---|---|
-| Package installs globally | ✓ `0.1.1` published to npm (2026-09-17T14:43Z, user ran the 2FA-gated publish manually). Verified from the registry: installed into a clean temp prefix → `doctor` HEALTHY, dry-run fix present, `glm-worker` returned `REGISTRY_OK`; machine's own global install now tracks the registry. Fresh-machine install (§50) still untested — everything so far is this one machine |
+| Package installs globally | ✓ `0.1.1` and `0.2.0` published to npm (user runs the 2FA-gated publish manually; latest = 0.2.0, tags v0.1.1/v0.2.0 pushed to GitHub). Both verified from the registry: installed into clean temp prefixes → binaries incl. `glm-fast` work, `glm-worker` returned `REGISTRY_OK`/`V02_OK`; machine's own global install tracks the registry. Fresh-machine install (§50) remains blocked on hardware |
 | Four CLI binaries work | ✓ implemented, exercised via `tests/fixtures/fake-agent.mjs` |
 | ZAI key setup works | ✓ `key set`/`key check`/`key remove` tested end to end (`tests/integration/key-command.test.ts`) via injected `prompt`/`setEnv`/`deleteEnv` — real key set once manually via `glm-router key set` earlier in the project's life, real machine confirms `doctor`/`status` see it |
 | Stale Orca environment handled | ✓ `resolveZaiApiKey()` unit-tested (process env → Windows User Env → fail) |
@@ -35,20 +35,24 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
 | Integration tests pass | ✓ same run, fake-agent based |
 | README complete | ✓ covers every §52 section |
 
-**Known gaps** (not blocking, but real before calling v0.1 done beyond "code complete"):
-- **npm publish**: done — `0.1.1` is live and tagged `latest` (published 2026-09-17T14:43Z by the
-  user; account 2FA blocks agent-run publish, hence manual). Note `0.1.0` on the registry is a
-  stale build missing the last 5 commits — anyone hitting it should move to `0.1.1`.
-- §50 acceptance criteria: everything verified on *this* machine (2026-09-17) — `doctor`/
-  `doctor --network`/`status` HEALTHY with the real endpoint reachable, `glm-worker` returned
-  `WORKER_OK` (and later `REGISTRY_OK` from the registry install), `glm-review` confirmed it has
-  no write-capable tool and created nothing, `project init --dry-run` reports "already up to
-  date" on installed blocks without touching files. Registry install verified into a clean
-  prefix too. Still open: run the same suite on an actual **fresh** Windows machine.
-- §49 Windows test matrix: PowerShell axis verified as far as this machine allows — the code
-  always spawns `powershell.exe` (5.1) for key resolution regardless of parent shell, and
-  `glm-router key check` was run from a PowerShell 7.6 parent successfully. Still open: real
-  Win10 machine, Orca embedded terminal.
+**Known gaps — all remaining items are BLOCKED on hardware** (no code work pending):
+
+- **[BLOCKED — needs a fresh Windows machine]** §50 acceptance criteria: everything verified on
+  *this* machine (2026-09-17) — `doctor`/`doctor --network`/`status` HEALTHY with the real
+  endpoint reachable, `glm-worker` returned `WORKER_OK` (and later `REGISTRY_OK`/`V02_OK` from
+  registry installs), `glm-review` confirmed it has no write-capable tool and created nothing,
+  `project init --dry-run` reports "already up to date" on installed blocks without touching
+  files. Registry installs of 0.1.1 and 0.2.0 verified into clean prefixes, incl. the
+  simulated-fresh-machine pass (no claude/codex/git states, fake home). Still open: run the same
+  suite on an actual **fresh** Windows machine via `npm install -g glm-coding-router`.
+- **[BLOCKED — needs Win10 hardware + Orca terminal]** §49 Windows test matrix: PowerShell axis
+  verified as far as this machine allows — the code always spawns `powershell.exe` (5.1) for key
+  resolution regardless of parent shell, and `glm-router key check` was run from a PowerShell 7.6
+  parent successfully. Still open: real Win10 machine, Orca embedded terminal.
+
+When the hardware is available: for §50, follow the checks listed above on the fresh machine
+(MEMORY.md carries the full context); for §49, repeat the key checks under PS 5.1/7.x on Win10
+and run `glm-worker` inside an Orca embedded terminal.
 
 ## Decisions made outside the spec
 
@@ -89,3 +93,4 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
 | 2026-09-17 | Pushed main + tag `v0.1.1` to GitHub on user request; closed the PowerShell axis of §49 (key resolution always spawns `powershell.exe` 5.1 regardless of parent shell; `key check` verified from a PS 7.6 parent) | `533ed3a` |
 | 2026-09-17 | **v0.2 implemented** per spec §54: new `glm-fast` interactive binary (all model slots pinned to `models.fast`), `--profile <name>` on all four task binaries, `profiles` map in config schema. Spec written first: `specs/glm-fast-profiles.md`. 18 new tests (`tests/unit/profile.test.ts`, `tests/integration/glm-fast.test.ts`, fake-agent now dumps all three model slots); live-verified `glm-fast --version` and the unknown-profile `ERROR [11]` path. 132 tests, 17 files, all green. Version bumped to 0.2.0 | `3234816` |
 | 2026-09-17 | User published 0.2.0 to npm; verified from the registry into a clean prefix (shims incl. glm-fast, `glm-fast --version` spawn, unknown-profile ERROR, `glm-worker` → `V02_OK`) and upgraded this machine's global install to the registry version. GitHub main is in sync | — |
+| 2026-09-17 | Pushed tag `v0.2.0`. Marked §49/§50 as BLOCKED-on-hardware in Known gaps — no code work pending; when a fresh Windows machine / Orca terminal is available, the MEMORY gap entries list exactly what to run | — |
