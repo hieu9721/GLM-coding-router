@@ -5,13 +5,14 @@ import type { RouterConfig } from "./config.js";
 import { Errors } from "./errors.js";
 import { isWindows } from "./platform.js";
 
-function runWhere(name: string): string[] {
+function runWhere(name: string, env: NodeJS.ProcessEnv = process.env): string[] {
   const finder = isWindows() ? "where.exe" : "which";
   try {
     const output = execFileSync(finder, [name], {
       encoding: "utf8",
       windowsHide: true,
       stdio: ["ignore", "pipe", "ignore"],
+      env,
     });
     return output
       .split(/\r?\n/)
@@ -59,14 +60,17 @@ function preferNative(matches: string[]): string | undefined {
  *   2. PATH search through Node
  *   3. config override
  *   4. error
+ *
+ * `env` defaults to `process.env` and is threaded through for testability —
+ * production callers never pass it.
  */
-export function locateClaude(config?: RouterConfig): string {
-  const matches = runWhere("claude");
+export function locateClaude(config?: RouterConfig, env: NodeJS.ProcessEnv = process.env): string {
+  const matches = runWhere("claude", env);
   const fromWhere = preferNative(matches);
   if (fromWhere) {
     return fromWhere;
   }
-  const fromPath = searchPathFor("claude");
+  const fromPath = searchPathFor("claude", env);
   if (fromPath) {
     return fromPath;
   }
@@ -86,12 +90,12 @@ export function locateClaude(config?: RouterConfig): string {
  * the tool must work with a Claude-only setup. `required` callers
  * (glm commands that need codex) get a proper error.
  */
-export function locateCodex(config?: RouterConfig): string | undefined {
-  const matches = runWhere("codex");
+export function locateCodex(config?: RouterConfig, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const matches = runWhere("codex", env);
   if (matches.length > 0) {
     return preferNative(matches);
   }
-  const fromPath = searchPathFor("codex");
+  const fromPath = searchPathFor("codex", env);
   if (fromPath) {
     return fromPath;
   }
@@ -102,8 +106,8 @@ export function locateCodex(config?: RouterConfig): string | undefined {
   return undefined;
 }
 
-export function codexRequired(config?: RouterConfig): string {
-  const found = locateCodex(config);
+export function codexRequired(config?: RouterConfig, env: NodeJS.ProcessEnv = process.env): string {
+  const found = locateCodex(config, env);
   if (!found) {
     throw Errors.codexNotFound();
   }

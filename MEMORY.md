@@ -19,8 +19,8 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
 | Four CLI binaries work | ✓ implemented, exercised via `tests/fixtures/fake-agent.mjs` |
 | ZAI key setup works | ✓ `key set`/`key check` implemented; resolution logic unit-tested, command itself isn't |
 | Stale Orca environment handled | ✓ `resolveZaiApiKey()` unit-tested (process env → Windows User Env → fail) |
-| Claude detection works | ⚠ `locateClaude()` implemented — no test exercises the discovery order itself |
-| Codex detection works | ⚠ `locateCodex()` implemented — same gap as above |
+| Claude detection works | ✓ `locateClaude()` — discovery order (where.exe → PATH → override → error) unit-tested with an isolated PATH (`tests/unit/claude-discovery.test.ts`) |
+| Codex detection works | ✓ `locateCodex()`/`codexRequired()` — same test file, same isolation technique |
 | Interactive GLM works (`glm-chat`) | ⚠ implemented, unit-level only — never run against a real `claude.exe` |
 | Worker GLM works | ✓ implemented + integration-tested |
 | Read-only GLM works | ✓ implemented + tested (tool surface restricted to `Read,Glob,Grep`) |
@@ -31,13 +31,11 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
 | `status` works | ⚠ implemented — no test coverage |
 | `uninstall` works | ⚠ implemented — no test coverage |
 | Secrets never logged | ✓ tested (`redact()`) |
-| Unit tests pass | ✓ 68/68, 6 files (confirmed 2026-09-17) |
+| Unit tests pass | ✓ 80/80, 7 files (confirmed 2026-09-17) |
 | Integration tests pass | ✓ same run, fake-agent based |
 | README complete | ✓ covers every §52 section |
 
 **Known gaps** (not blocking, but real before calling v0.1 done beyond "code complete"):
-- No test drives `locateClaude`/`locateCodex` through their actual discovery order
-  (`where.exe` → PATH search → config override → error) — only exercised indirectly.
 - No command-level test for `doctor`, `status`, `init` (wizard), `uninstall`, `key`, `config` —
   only the primitives underneath them are tested.
 - §50 acceptance criteria (fresh Windows machine, real `claude.exe`, real Z.ai key, end-to-end
@@ -50,6 +48,7 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
 | Date | Decision | Why |
 |---|---|---|
 | 2026-09-17 | Set `CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1` in the child env (`src/core/env.ts`) | GLM models aren't in Claude Code's model catalog, so it was enforcing an incorrect 200k context window on them |
+| 2026-09-17 | `locateClaude`/`locateCodex`/`codexRequired` now take an optional trailing `env` param (default `process.env`), threaded into `where.exe`/`which` and `searchPathFor` | Lets tests fully replace `PATH` to isolate discovery from whatever is actually installed on the machine running the tests, without mocking modules — matches the project's existing "real fs/temp-dir, no `vi.mock`" test style |
 
 ## Constraints discovered
 
@@ -65,3 +64,4 @@ Checked against the spec's Definition of Done (§51) on 2026-09-17 — code read
 |---|---|---|
 | 2026-09-17 | Scaffolded and implemented the full v0.1 CLI (core runtime, commands, tests, docs) | `ef60a43`..`ede6919` |
 | 2026-09-17 | Loaded the spec's Definition of Done (§51) against actual code + a real build/test/lint run; recorded gap list above | — |
+| 2026-09-17 | Closed the `locateClaude`/`locateCodex` discovery-order test gap: refactored for env injection, added `tests/unit/claude-discovery.test.ts` (12 tests) | `a274def`.. |
