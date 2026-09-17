@@ -2,8 +2,9 @@ import prompts from "prompts";
 import fs from "node:fs";
 import os from "node:os";
 import { configDir } from "../core/paths.js";
+import { ExitCode } from "../core/errors.js";
 import { CodexSkillInstaller, glmDelegationSkill } from "../integrations/skill.js";
-import { keyRemoveCommand } from "./key.js";
+import { keyRemoveCommand, type PromptFn } from "./key.js";
 import { removeClaudeIntegration, removeCodexIntegration } from "../integrations/index.js";
 import type { GlobalOptions } from "./context.js";
 
@@ -14,7 +15,12 @@ interface UninstallChoices {
   removeKey: boolean;
 }
 
-async function askChoices(options: GlobalOptions): Promise<UninstallChoices> {
+type AskChoicesResult =
+  | { kind: "ok"; choices: UninstallChoices }
+  | { kind: "non-interactive" }
+  | { kind: "cancelled" };
+
+async function askChoices(options: GlobalOptions, prompt: PromptFn): Promise<AskChoicesResult> {
   // Defaults per spec §44: keep ZAI_API_KEY; destructive credential removal
   // requires explicit consent, so --yes never flips it.
   const defaults: UninstallChoices = {
@@ -24,14 +30,16 @@ async function askChoices(options: GlobalOptions): Promise<UninstallChoices> {
     removeKey: false,
   };
   if (options.yes || options.force) {
-    return options.force ? { ...defaults, removeProjectIntegration: true } : defaults;
+    return {
+      kind: "ok",
+      choices: options.force ? { ...defaults, removeProjectIntegration: true } : defaults,
+    };
   }
   if (!process.stdin.isTTY) {
-    process.stdout.write("Non-interactive terminal detected. Re-run with --yes for safe defaults.\n");
-    process.exit(2);
+    return { kind: "non-interactive" };
   }
 
-  const response = await prompts([
+  const response = await prompt([
     { type: "confirm", name: "removeConfig", message: "Remove global configuration?", initial: true },
     { type: "confirm", name: "removeSkill", message: "Remove Codex skill?", initial: true },
     { type: "confirm", name: "removeProject", message: "Remove current project integration?", initial: false },
@@ -39,21 +47,42 @@ async function askChoices(options: GlobalOptions): Promise<UninstallChoices> {
   ]);
 
   if (response.removeConfig === undefined) {
-    process.stdout.write("Cancelled.\n");
-    process.exit(1);
+    return { kind: "cancelled" };
   }
   return {
-    removeConfig: Boolean(response.removeConfig),
-    removeSkill: Boolean(response.removeSkill),
-    removeProjectIntegration: Boolean(response.removeProject),
-    removeKey: Boolean(response.removeKey),
+    kind: "ok",
+    choices: {
+      removeConfig: Boolean(response.removeConfig),
+      removeSkill: Boolean(response.removeSkill),
+      removeProjectIntegration: Boolean(response.removeProject),
+      removeKey: Boolean(response.removeKey),
+    },
   };
 }
 
+export interface UninstallDeps {
+  readonly home?: string;
+  readonly root?: string;
+  readonly prompt?: PromptFn;
+  readonly deleteEnv?: (name: string) => void;
+}
+
 /** glm-router uninstall (spec §44): wizard with safe defaults. */
-export async function uninstallCommand(options: GlobalOptions): Promise<number> {
-  const choices = await askChoices(options);
-  const home = os.homedir();
+export async function uninstallCommand(
+  options: GlobalOptions,
+  deps: UninstallDeps = {},
+): Promise<number> {
+  const askResult = await askChoices(options, deps.prompt ?? prompts);
+  if (askResult.kind === "non-interactive") {
+    process.stdout.write("Non-interactive terminal detected. Re-run with --yes for safe defaults.\n");
+    return ExitCode.InvalidArgs;
+  }
+  if (askResult.kind === "cancelled") {
+    process.stdout.write("Cancelled.\n");
+    return ExitCode.GenericFailure;
+  }
+  const choices = askResult.choices;
+  const home = deps.home ?? os.homedir();
 
   if (choices.removeSkill) {
     const skillInstaller = new CodexSkillInstaller(home);
@@ -67,7 +96,7 @@ export async function uninstallCommand(options: GlobalOptions): Promise<number> 
   }
 
   if (choices.removeProjectIntegration) {
-    const root = process.cwd();
+    const root = deps.root ?? process.cwd();
     removeClaudeIntegration(root);
     removeCodexIntegration(root);
     process.stdout.write("✓ Project integration removed (CLAUDE.md / AGENTS.md managed blocks)\n");
@@ -84,7 +113,7 @@ export async function uninstallCommand(options: GlobalOptions): Promise<number> 
   }
 
   if (choices.removeKey) {
-    await keyRemoveCommand();
+    await keyRemoveCommand({ deleteEnv: deps.deleteEnv });
     process.stdout.write("✓ ZAI_API_KEY removed from Windows User Environment\n");
   } else {
     process.stdout.write("✓ ZAI_API_KEY kept\n");

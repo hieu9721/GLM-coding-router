@@ -3,11 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import { loadConfig, saveConfig, type RouterConfig } from "../core/config.js";
 import { configPath } from "../core/paths.js";
+import { ExitCode } from "../core/errors.js";
 import { runDoctorChecks, type CheckResult } from "./doctor.js";
 import { setWindowsUserEnv, ZAI_API_KEY_ENV } from "../core/zai-key.js";
 import { isWindows } from "../core/platform.js";
 import { CodexSkillInstaller, glmDelegationSkill } from "../integrations/skill.js";
 import type { GlobalOptions } from "./context.js";
+import type { PromptFn } from "./key.js";
 import { version } from "../core/version.js";
 
 function renderEnvironment(results: readonly CheckResult[]): string {
@@ -26,18 +28,24 @@ interface InitChoices {
   codexSkill: boolean;
 }
 
-async function askChoices(existingKey: boolean, options: GlobalOptions): Promise<InitChoices> {
+type AskChoicesResult =
+  | { kind: "ok"; choices: InitChoices }
+  | { kind: "non-interactive" }
+  | { kind: "cancelled" };
+
+async function askChoices(
+  existingKey: boolean,
+  options: GlobalOptions,
+  prompt: PromptFn,
+): Promise<AskChoicesResult> {
   if (options.yes) {
-    return { configureKey: !existingKey, claude: true, codex: true, codexSkill: true };
+    return { kind: "ok", choices: { configureKey: !existingKey, claude: true, codex: true, codexSkill: true } };
   }
   if (!process.stdin.isTTY) {
-    process.stdout.write(
-      "Non-interactive terminal detected. Re-run with --yes to accept defaults.\n",
-    );
-    process.exit(2);
+    return { kind: "non-interactive" };
   }
 
-  const response = await prompts([
+  const response = await prompt([
     {
       type: existingKey ? null : "confirm",
       name: "configureKey",
@@ -50,31 +58,54 @@ async function askChoices(existingKey: boolean, options: GlobalOptions): Promise
   ]);
 
   if (response.claude === undefined) {
-    process.stdout.write("Cancelled.\n");
-    process.exit(1);
+    return { kind: "cancelled" };
   }
   return {
-    configureKey: existingKey ? true : Boolean(response.configureKey),
-    claude: Boolean(response.claude),
-    codex: Boolean(response.codex),
-    codexSkill: Boolean(response.codexSkill),
+    kind: "ok",
+    choices: {
+      configureKey: existingKey ? true : Boolean(response.configureKey),
+      claude: Boolean(response.claude),
+      codex: Boolean(response.codex),
+      codexSkill: Boolean(response.codexSkill),
+    },
   };
 }
 
+export interface InitDeps {
+  readonly home?: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly readUserEnv?: (name: string) => string | undefined;
+  readonly setEnv?: (name: string, value: string) => void;
+  readonly prompt?: PromptFn;
+}
+
 /** glm-router init (spec §7): environment report, key setup, config, skill. Idempotent. */
-export async function initCommand(options: GlobalOptions): Promise<number> {
+export async function initCommand(options: GlobalOptions, deps: InitDeps = {}): Promise<number> {
+  const prompt = deps.prompt ?? prompts;
+  const home = deps.home ?? os.homedir();
+  const env = deps.env ?? process.env;
+  const setEnv = deps.setEnv ?? setWindowsUserEnv;
+
   process.stdout.write(`GLM Coding Router v${version}\n\n`);
 
-  const report = runDoctorChecks();
+  const report = runDoctorChecks({ home, env, readUserEnv: deps.readUserEnv });
   process.stdout.write("Environment\n\n");
   process.stdout.write(renderEnvironment(report.results) + "\n\n");
 
   const existingKey = report.keySource !== undefined;
-  const choices = await askChoices(existingKey, options);
+  const askResult = await askChoices(existingKey, options, prompt);
+  if (askResult.kind === "non-interactive") {
+    process.stdout.write("Non-interactive terminal detected. Re-run with --yes to accept defaults.\n");
+    return ExitCode.InvalidArgs;
+  }
+  if (askResult.kind === "cancelled") {
+    process.stdout.write("Cancelled.\n");
+    return ExitCode.GenericFailure;
+  }
+  const choices = askResult.choices;
 
   process.stdout.write("\nInstalling...\n\n");
-  const home = os.homedir();
-  const config = loadConfig();
+  const config = loadConfig(home);
   const nextConfig: RouterConfig = {
     ...config,
     integrations: {
@@ -91,7 +122,7 @@ export async function initCommand(options: GlobalOptions): Promise<number> {
     if (!isWindows()) {
       process.stdout.write("⚠ Key storage requires Windows in v0.1 — skipped\n");
     } else {
-      const keyResponse = await prompts({
+      const keyResponse = await prompt({
         type: "password",
         name: "key",
         message: "Enter Z.ai Coding Plan API key:",
@@ -101,7 +132,7 @@ export async function initCommand(options: GlobalOptions): Promise<number> {
         process.stderr.write("Cancelled.\n");
         return 1;
       }
-      setWindowsUserEnv(ZAI_API_KEY_ENV, String(keyResponse.key).trim());
+      setEnv(ZAI_API_KEY_ENV, String(keyResponse.key).trim());
       process.stdout.write(`✓ ${ZAI_API_KEY_ENV} configured\n`);
     }
   } else {
