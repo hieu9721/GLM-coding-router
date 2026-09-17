@@ -7,20 +7,27 @@ import { CodexSkillInstaller } from "../integrations/skill.js";
 import { GLM_DELEGATION_SKILL_NAME } from "../templates/glm-delegation-skill.js";
 import { emitJson, type GlobalOptions } from "./context.js";
 
+export interface StatusDeps {
+  readonly home?: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly readUserEnv?: (name: string) => string | undefined;
+}
+
 /** Fast, fully offline summary (spec §41) — no API requests, no key values. */
-export function statusCommand(options: GlobalOptions): number {
-  const config = loadConfig();
-  const home = os.homedir();
-  const resolved = resolveZaiApiKey();
+export function statusCommand(options: GlobalOptions, deps: StatusDeps = {}): number {
+  const home = deps.home ?? os.homedir();
+  const env = deps.env ?? process.env;
+  const config = loadConfig(home);
+  const resolved = resolveZaiApiKey({ env, readUserEnv: deps.readUserEnv });
   const claudeInstalled = (() => {
     try {
-      locateClaude(config);
+      locateClaude(config, env);
       return true;
     } catch {
       return false;
     }
   })();
-  const codexInstalled = Boolean(locateCodex(config));
+  const codexInstalled = Boolean(locateCodex(config, env));
   const skillInstaller = new CodexSkillInstaller(home);
   const skillInstalled =
     skillInstaller.detect() !== null && skillInstaller.isInstalled(GLM_DELEGATION_SKILL_NAME);
