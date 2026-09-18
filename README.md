@@ -233,6 +233,26 @@ Notes:
   orchestration isn't drivable today); the harness is stack-shaped so it can
   be added later.
 
+## usage
+
+Provider usage snapshots (spec §54 v0.5) — what is reliably retrievable:
+
+```powershell
+glm-router usage
+```
+
+- **Z.ai Coding Plan quota** (network): queries the Z.ai monitor endpoint
+  (`/api/monitor/usage/quota/limit`) with your key and shows each credit
+  window — consumed/total, percentage, reset time — plus the plan level.
+  Unreachable endpoint or a rejected request renders `✗ <reason>` and exits 1.
+- **Local totals** (offline): aggregates saved benchmark reports — run count
+  and summed input/output tokens (`glm-router benchmark` writes them).
+- **Claude quota / Codex usage**: always shown as "not available" — neither
+  exposes a headless usage API today (and claude.ai quota is irrelevant while
+  traffic is routed to GLM).
+
+`--json` emits the same data machine-readably. No key configured → `ERROR [10]`.
+
 ## CLI reference
 
 ```text
@@ -245,6 +265,7 @@ glm-router config show
 glm-router config set models.main glm-5.3
 glm-router delegate <name>   run a GLM worker in an isolated git worktree
 glm-router benchmark         measure the Claude+GLM stack on built-in tasks
+glm-router usage             Z.ai quota snapshot + local benchmark totals
 glm-router project init      CLAUDE.md / AGENTS.md managed blocks (--dry-run supported)
 glm-router project remove
 glm-router skill install     optional Codex delegation skill

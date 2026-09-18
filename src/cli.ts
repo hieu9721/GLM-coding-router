@@ -15,6 +15,7 @@ import { skillInstallCommand, skillRemoveCommand } from "./commands/skill.js";
 import { uninstallCommand } from "./commands/uninstall.js";
 import { delegateCommand } from "./commands/delegate.js";
 import { benchmarkCommand } from "./commands/benchmark.js";
+import { usageCommand } from "./commands/usage.js";
 
 const program = new Command();
 
@@ -124,6 +125,11 @@ program
   .action((commandOptions: { task?: string[]; stack?: string; maxTurns?: number; repeat?: number }) =>
     execute(() => benchmarkCommand({ ...globalOptions(), ...commandOptions })),
   );
+
+program
+  .command("usage")
+  .description("provider usage snapshots: Z.ai Coding Plan quota + local benchmark totals")
+  .action(() => execute(() => usageCommand(globalOptions())));
 
 program
   .command("uninstall")

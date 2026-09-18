@@ -25,7 +25,7 @@ Claude Code / Codex → shell command → glm-chat / glm-worker / glm-review →
 ```
 
 - `src/cli.ts` — main CLI entry (`glm-router`), built with commander. Each subcommand
-  (`init`, `doctor`, `status`, `key`, `config`, `delegate`, `benchmark`, `project`, `skill`,
+  (`init`, `doctor`, `status`, `key`, `config`, `delegate`, `benchmark`, `usage`, `project`, `skill`,
   `uninstall`) lives in `src/commands/` and is wired here.
 - `src/bin/{glm-chat,glm-fast,glm-worker,glm-review}.ts` — the four thin task binaries that
   resolve the Z.ai key, locate `claude.exe`, build the injected env, and spawn the child process.
