@@ -161,6 +161,45 @@ Unknown profile names fail with `ERROR [11]` listing the available ones.
 Note: `--profile` belongs to these wrappers — it shadows Claude Code's own
 `--profile` flag inside them.
 
+## delegate
+
+Run a GLM worker in an **isolated git worktree** so parallel tasks never trample
+each other's working tree (`glm-router delegate backend|frontend|tests`):
+
+```powershell
+glm-router delegate backend "Implement refresh token validation in internal/auth"
+Get-Content task.md | glm-router delegate auth-refresh
+```
+
+Each run creates a worktree at `<repo>.glm-worktrees\<name>` (outside the repo,
+so your checkout's status stays clean) on a new branch `glm/delegate/<name>`
+cut from `HEAD`, and runs the standard `glm-worker` inside it. The worktree and
+branch are **kept** after the run — the tool never commits, merges, or deletes
+your work; the footer prints the path and the merge command:
+
+```text
+[glm-router] worktree kept at D:\code\my-repo.glm-worktrees\backend
+[glm-router] next: inspect it, then merge glm/delegate/backend (or discard with git worktree remove)
+```
+
+- Prompt priority is stdin → arguments, same as `glm-worker`.
+- Profiles: `--profile test` explicitly, or — when omitted — a profile literally
+  named after the delegate (`delegate test` → the `test` profile) if one exists.
+- `--remove` deletes the worktree **after a successful run only**; plain
+  `git worktree remove` is used, so git refuses (and the worktree is kept) when
+  the worker left uncommitted changes. The branch is always kept.
+- Pre-flight checks fail fast (`ERROR [31]`) when the branch or directory
+  already exists, or the repo has no commits yet; outside a git repo →
+  `ERROR [30]`. Uncommitted changes in your main checkout are **not** visible
+  to the worker — it starts from the last commit.
+- `--dry-run` prints the plan; `--json` prints pre-flight and result objects.
+- Run several delegates concurrently — distinct names cannot collide:
+
+```powershell
+glm-router delegate backend "Task A"   # terminal 1
+glm-router delegate tests "Task B"     # terminal 2
+```
+
 ## CLI reference
 
 ```text
@@ -171,6 +210,7 @@ glm-router key set           store ZAI_API_KEY (Windows User Environment)
 glm-router key check         key configured? from which source?
 glm-router config show
 glm-router config set models.main glm-5.3
+glm-router delegate <name>   run a GLM worker in an isolated git worktree
 glm-router project init      CLAUDE.md / AGENTS.md managed blocks (--dry-run supported)
 glm-router project remove
 glm-router skill install     optional Codex delegation skill

@@ -25,8 +25,8 @@ Claude Code / Codex → shell command → glm-chat / glm-worker / glm-review →
 ```
 
 - `src/cli.ts` — main CLI entry (`glm-router`), built with commander. Each subcommand
-  (`init`, `doctor`, `status`, `key`, `config`, `project`, `skill`, `uninstall`) lives in
-  `src/commands/` and is wired here.
+  (`init`, `doctor`, `status`, `key`, `config`, `delegate`, `project`, `skill`, `uninstall`)
+  lives in `src/commands/` and is wired here.
 - `src/bin/{glm-chat,glm-fast,glm-worker,glm-review}.ts` — the four thin task binaries that
   resolve the Z.ai key, locate `claude.exe`, build the injected env, and spawn the child process.
   `glm-chat` is interactive; `glm-fast` is interactive pinned to the fast model; `glm-worker`
@@ -35,7 +35,9 @@ Claude Code / Codex → shell command → glm-chat / glm-worker / glm-review →
 - `src/core/` — shared runtime: `config.ts` (zod-validated config), `paths.ts`, `zai-key.ts` (key
   resolution), `claude.ts` (`locateClaude`/`locateCodex` discovery), `env.ts` (`createGlmEnv`,
   the child-only environment), `process.ts` (`spawnAgent`), `prompt.ts` (stdin/args resolution),
-  `profile.ts` (`extractProfileFlag`/`applyProfile`), `platform.ts`, `errors.ts`
+  `profile.ts` (`extractProfileFlag`/`applyProfile`), `git.ts` (`runGit`/`gitTopLevel` for
+  delegate), `worktree.ts` (delegate worktree lifecycle, see `specs/delegate-worktrees.md`),
+  `platform.ts`, `errors.ts`
   (`GlmRouterError`, `ExitCode`, `Errors` factory), `logging.ts` (`redact`), `main-guard.ts`
   (`isMainModule`), `version.ts`.
 - `src/integrations/` — `claude.ts` and `codex.ts` wire the managed-block engine into each tool's

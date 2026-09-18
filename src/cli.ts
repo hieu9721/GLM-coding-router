@@ -13,6 +13,7 @@ import { projectInitCommand } from "./commands/project-init.js";
 import { projectRemoveCommand } from "./commands/project-remove.js";
 import { skillInstallCommand, skillRemoveCommand } from "./commands/skill.js";
 import { uninstallCommand } from "./commands/uninstall.js";
+import { delegateCommand } from "./commands/delegate.js";
 
 const program = new Command();
 
@@ -102,6 +103,15 @@ skill
   .command("remove")
   .description("remove the glm-delegation skill")
   .action(() => execute(() => Promise.resolve(skillRemoveCommand(globalOptions()))));
+
+program
+  .command("delegate <name> [prompt...]")
+  .description("run a GLM worker in an isolated git worktree (branch glm/delegate/<name>)")
+  .option("--profile <name>", "profile overlay (defaults to a profile named <name> if defined)")
+  .option("--remove", "remove the worktree after a successful run (branch is always kept)")
+  .action((name: string, prompt: string[], commandOptions: { profile?: string; remove?: boolean }) =>
+    execute(() => delegateCommand(name, prompt, { ...globalOptions(), ...commandOptions })),
+  );
 
 program
   .command("uninstall")

@@ -130,6 +130,38 @@ export const Errors = {
       exitCode: ExitCode.InvalidArgs,
     }),
 
+  gitNotFound: (): GlmRouterError =>
+    new GlmRouterError({
+      name: "GIT_NOT_FOUND",
+      message: "git was not found on PATH.",
+      hint: ["delegate needs git for worktree isolation.", "", "Install Git for Windows: https://git-scm.com/download/win"],
+      exitCode: ExitCode.ProjectRootNotFound,
+    }),
+
+  gitRepoRequired: (cwd: string): GlmRouterError =>
+    new GlmRouterError({
+      name: "GIT_REPO_REQUIRED",
+      message: `Not inside a git repository (cwd: ${cwd}).`,
+      hint: ["delegate runs each worker in a git worktree and needs a repo root.", "", "Run it from inside the project's git repository, or create one:", "", "  git init"],
+      exitCode: ExitCode.ProjectRootNotFound,
+    }),
+
+  worktreeFailed: (operation: string, cause: string, hint?: readonly string[]): GlmRouterError =>
+    new GlmRouterError({
+      name: "WORKTREE_FAILED",
+      message: `git ${operation} failed: ${cause.trim() || "unknown git error"}`,
+      hint: hint ?? ["Fix the state git describes above, then re-run the delegate command."],
+      exitCode: ExitCode.ManagedFileWriteFailed,
+    }),
+
+  invalidDelegateName: (name: string): GlmRouterError =>
+    new GlmRouterError({
+      name: "INVALID_DELEGATE_NAME",
+      message: `"${name}" is not a valid delegate name.`,
+      hint: ["Use letters, digits, dots, dashes, underscores; start with a letter or digit.", "", "Examples: backend, auth-refresh, tests.v2"],
+      exitCode: ExitCode.InvalidArgs,
+    }),
+
   managedBlockCorrupt: (file: string, cause: string): GlmRouterError =>
     new GlmRouterError({
       name: "MANAGED_BLOCK_CORRUPT",
