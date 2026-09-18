@@ -396,7 +396,7 @@ npm run dev        # tsx src/cli.ts <args>
 
 Integration tests spawn `tests/fixtures/fake-agent.mjs` (via `node.exe`) to verify
 argument passing, environment injection, and exit-code propagation without spending
-API quota. See the `GLM Coding Router — Technical Specification v0.1.md` for the full
+API quota. See the `docs/GLM Coding Router — Technical Specification v0.1.md` for the full
 v0.1 contract (exit codes, managed-block test matrix, acceptance criteria).
 
 ## Publishing

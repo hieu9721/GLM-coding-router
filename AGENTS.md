@@ -9,7 +9,7 @@ between the two files. See "Scaling beyond v0.1" at the bottom before adding new
 npm CLI (`glm-coding-router`, CLI name `glm-router`) that lets Claude Code and Codex act as orchestrators while GLM Coding Plan (via Z.ai's Anthropic-compatible endpoint `https://api.z.ai/api/anthropic`) does implementation work. Provides five binaries: `glm-router`, `glm-chat`, `glm-fast`, `glm-worker`, `glm-review`.
 
 - v0.1 targets **Windows 10/11 only**, Node >= 20, TypeScript, ESM, distributed via npm.
-- The authoritative source is `GLM Coding Router — Technical Specification v0.1.md` — read the relevant sections before changing behavior. The spec is bilingual (Vietnamese/English); section numbers referenced here come from it.
+- The authoritative source is `docs/GLM Coding Router — Technical Specification v0.1.md` — read the relevant sections before changing behavior. The spec is bilingual (Vietnamese/English); section numbers referenced here come from it.
 
 ## Session memory
 
