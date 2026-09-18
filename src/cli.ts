@@ -16,6 +16,7 @@ import { uninstallCommand } from "./commands/uninstall.js";
 import { delegateCommand } from "./commands/delegate.js";
 import { benchmarkCommand } from "./commands/benchmark.js";
 import { usageCommand } from "./commands/usage.js";
+import { mcpCommand } from "./commands/mcp.js";
 
 const program = new Command();
 
@@ -130,6 +131,19 @@ program
   .command("usage")
   .description("provider usage snapshots: Z.ai Coding Plan quota + local benchmark totals")
   .action(() => execute(() => usageCommand(globalOptions())));
+
+const mcp = program
+  .command("mcp")
+  .description("optional glm-mcp MCP server: snippet, install, remove")
+  .action(() => execute(() => mcpCommand(globalOptions(), "info")));
+mcp
+  .command("install")
+  .description("register glm-mcp with Claude Code (claude mcp add -s user)")
+  .action(() => execute(() => mcpCommand(globalOptions(), "install")));
+mcp
+  .command("remove")
+  .description("unregister glm-mcp from Claude Code (claude mcp remove -s user)")
+  .action(() => execute(() => mcpCommand(globalOptions(), "remove")));
 
 program
   .command("uninstall")

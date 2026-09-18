@@ -25,37 +25,55 @@ export interface SkillInstaller {
 }
 
 /**
- * Installs SKILL.md-based skills into the Codex home (~/.codex/skills).
- * Detection is conservative: if ~/.codex does not exist there is no
- * supported Codex installation to enhance — return null and let callers warn+skip.
+ * Shared SKILL.md-folder mechanics; subclasses only pick the agent home dir
+ * (specs/v1-architecture.md). Detection stays conservative: a missing home
+ * means no supported installation to enhance — return null, callers warn+skip.
  */
-export class CodexSkillInstaller implements SkillInstaller {
-  private readonly codexHome: string;
-
-  public constructor(home: string) {
-    this.codexHome = path.join(home, ".codex");
-  }
+abstract class HomeDirSkillInstaller implements SkillInstaller {
+  protected constructor(protected readonly agentHome: string) {}
 
   public detect(): SkillLocation | null {
-    if (!fs.existsSync(this.codexHome)) {
+    if (!fs.existsSync(this.agentHome)) {
       return null;
     }
-    return { skillsDir: path.join(this.codexHome, "skills") };
+    return { skillsDir: path.join(this.agentHome, "skills") };
   }
 
   public install(skill: SkillDefinition): void {
-    const skillDir = path.join(this.codexHome, "skills", skill.name);
+    const skillDir = path.join(this.agentHome, "skills", skill.name);
     atomicWriteFile(path.join(skillDir, "SKILL.md"), skill.content);
   }
 
   public remove(name: string): void {
-    const skillDir = path.join(this.codexHome, "skills", name);
+    const skillDir = path.join(this.agentHome, "skills", name);
     fs.rmSync(skillDir, { recursive: true, force: true });
   }
 
   public isInstalled(name: string): boolean {
-    return fs.existsSync(path.join(this.codexHome, "skills", name, "SKILL.md"));
+    return fs.existsSync(path.join(this.agentHome, "skills", name, "SKILL.md"));
   }
+}
+
+/** Installs skills into the Codex home (~/.codex/skills). */
+export class CodexSkillInstaller extends HomeDirSkillInstaller {
+  public constructor(home: string) {
+    super(path.join(home, ".codex"));
+  }
+}
+
+/** Installs skills into the Claude Code home (~/.claude/skills, specs/v1-architecture.md). */
+export class ClaudeSkillInstaller extends HomeDirSkillInstaller {
+  public constructor(home: string) {
+    super(path.join(home, ".claude"));
+  }
+}
+
+/** Every agent the delegation skill supports, in stable display order. */
+export function skillTargets(home: string): { agent: string; installer: SkillInstaller }[] {
+  return [
+    { agent: "Claude", installer: new ClaudeSkillInstaller(home) },
+    { agent: "Codex", installer: new CodexSkillInstaller(home) },
+  ];
 }
 
 export function glmDelegationSkill(): SkillDefinition {

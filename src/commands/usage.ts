@@ -11,7 +11,7 @@ import { emitJson, type GlobalOptions } from "./context.js";
 const ZAI_QUOTA_URL = "https://api.z.ai/api/monitor/usage/quota/limit";
 
 /** One CREDIT_LIMIT entry from the monitor API. */
-interface ZaiLimit {
+export interface ZaiLimit {
   readonly type?: string;
   readonly unit?: number;
   readonly number?: number;
@@ -22,7 +22,7 @@ interface ZaiLimit {
   readonly nextResetTime?: number;
 }
 
-interface ZaiQuotaData {
+export interface ZaiQuotaData {
   readonly level?: string;
   readonly limits?: readonly ZaiLimit[];
 }
@@ -52,8 +52,25 @@ function describeWindow(limit: ZaiLimit): string {
   return `window unit=${String(limit.unit)} x ${String(limit.number)}`;
 }
 
+/** One CREDIT_LIMIT entry from the monitor API. */
+export interface ZaiLimit {
+  readonly type?: string;
+  readonly unit?: number;
+  readonly number?: number;
+  readonly usage?: number;
+  readonly currentValue?: number;
+  readonly remaining?: number;
+  readonly percentage?: number;
+  readonly nextResetTime?: number;
+}
+
+export interface ZaiQuotaData {
+  readonly level?: string;
+  readonly limits?: readonly ZaiLimit[];
+}
+
 /** Fetch and validate the Z.ai quota snapshot. Never logs the Authorization header. */
-async function fetchZaiQuota(key: string, fetchImpl: typeof fetch): Promise<ZaiQuotaData> {
+export async function fetchZaiQuota(key: string, fetchImpl: typeof fetch): Promise<ZaiQuotaData> {
   let response: Response;
   try {
     response = await fetchImpl(ZAI_QUOTA_URL, {

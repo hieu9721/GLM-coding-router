@@ -253,6 +253,39 @@ glm-router usage
 
 `--json` emits the same data machine-readably. No key configured → `ERROR [10]`.
 
+## Agent skills (Claude Code + Codex)
+
+`glm-router skill install` writes the `glm-delegation` SKILL.md into **both**
+agent homes — `~/.claude/skills/` and `~/.codex/skills/` — so either
+orchestrator natively knows how to delegate to GLM workers. Missing homes are
+skipped with a note (optional enhancement, never fatal); `skill remove`
+cleans both. `status` shows one skill row per agent.
+
+## MCP server (optional)
+
+`glm-mcp` (installed with the package) exposes the router as MCP tools over
+stdio — any MCP client can delegate without shell syntax:
+
+| Tool | What it does |
+|---|---|
+| `glm_worker(prompt, profile?)` | implementation worker, returns output |
+| `glm_review(prompt, profile?)` | read-only review/exploration |
+| `glm_delegate(name, prompt)` | worker in an isolated git worktree |
+| `glm_usage()` | Z.ai quota windows + local benchmark totals |
+
+Register it with Claude Code (we never edit `~/.claude.json` ourselves — it
+goes through Claude's own CLI):
+
+```powershell
+glm-router mcp             # prints the snippet + the exact command
+glm-router mcp install     # claude mcp add -s user glm-coding-router -- node .../glm-mcp.js
+glm-router mcp remove      # claude mcp remove -s user glm-coding-router
+```
+
+Tool-level failures return `isError` results (missing key, no claude, outside
+a git repo, unreachable endpoint); the server never prints anything to stdout
+except JSON-RPC frames.
+
 ## CLI reference
 
 ```text
@@ -266,6 +299,7 @@ glm-router config set models.main glm-5.3
 glm-router delegate <name>   run a GLM worker in an isolated git worktree
 glm-router benchmark         measure the Claude+GLM stack on built-in tasks
 glm-router usage             Z.ai quota snapshot + local benchmark totals
+glm-router mcp               optional MCP server registration (glm-mcp)
 glm-router project init      CLAUDE.md / AGENTS.md managed blocks (--dry-run supported)
 glm-router project remove
 glm-router skill install     optional Codex delegation skill

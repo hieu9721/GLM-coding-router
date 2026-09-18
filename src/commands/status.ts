@@ -3,7 +3,7 @@ import { loadConfig } from "../core/config.js";
 import { locateClaude, locateCodex } from "../core/claude.js";
 import { version } from "../core/version.js";
 import { resolveZaiApiKey } from "../core/zai-key.js";
-import { CodexSkillInstaller } from "../integrations/skill.js";
+import { skillTargets } from "../integrations/skill.js";
 import { GLM_DELEGATION_SKILL_NAME } from "../templates/glm-delegation-skill.js";
 import { emitJson, type GlobalOptions } from "./context.js";
 
@@ -28,9 +28,17 @@ export function statusCommand(options: GlobalOptions, deps: StatusDeps = {}): nu
     }
   })();
   const codexInstalled = Boolean(locateCodex(config, env));
-  const skillInstaller = new CodexSkillInstaller(home);
-  const skillInstalled =
-    skillInstaller.detect() !== null && skillInstaller.isInstalled(GLM_DELEGATION_SKILL_NAME);
+  const skillState = (() => {
+    const rows: { agent: string; homeDetected: boolean; installed: boolean }[] = [];
+    for (const { agent, installer } of skillTargets(home)) {
+      rows.push({
+        agent,
+        homeDetected: installer.detect() !== null,
+        installed: installer.isInstalled(GLM_DELEGATION_SKILL_NAME),
+      });
+    }
+    return rows;
+  })();
 
   if (options.json) {
     emitJson({
@@ -41,7 +49,10 @@ export function statusCommand(options: GlobalOptions, deps: StatusDeps = {}): nu
       integrations: {
         claude: config.integrations.claude,
         codex: config.integrations.codex,
-        codexSkill: config.integrations.codexSkill && skillInstalled,
+        skills: skillState.map((row) => ({
+          agent: row.agent,
+          enabled: row.homeDetected && row.installed,
+        })),
       },
       models: config.models,
     });
@@ -57,11 +68,16 @@ export function statusCommand(options: GlobalOptions, deps: StatusDeps = {}): nu
     "",
     `Claude policy   ${config.integrations.claude ? "enabled" : "disabled"}`,
     `Codex policy    ${config.integrations.codex ? "enabled" : "disabled"}`,
-    `Codex skill     ${skillInstalled ? "enabled" : "disabled"}`,
+  ];
+  for (const row of skillState) {
+    const enabled = row.homeDetected && row.installed;
+    lines.push(`${row.agent} skill     ${enabled ? "enabled" : "disabled"}`);
+  }
+  lines.push(
     "",
     `Main model      ${config.models.main}`,
     `Fast model      ${config.models.fast}`,
-  ];
+  );
   process.stdout.write(lines.join("\n") + "\n");
   return 0;
 }

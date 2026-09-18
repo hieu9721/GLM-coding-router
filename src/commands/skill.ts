@@ -1,52 +1,69 @@
 import os from "node:os";
-import { CodexSkillInstaller, glmDelegationSkill } from "../integrations/skill.js";
+import { glmDelegationSkill, skillTargets } from "../integrations/skill.js";
 import type { GlobalOptions } from "./context.js";
 
-function installer(): CodexSkillInstaller {
-  return new CodexSkillInstaller(os.homedir());
+interface TargetResult {
+  readonly agent: string;
+  readonly outcome: "installed" | "already" | "skipped" | "removed" | "absent";
+  readonly detail: string;
 }
 
-/** glm-router skill install (spec §27): optional enhancement; warn+skip when unsupported. */
-export function skillInstallCommand(options: GlobalOptions): number {
-  const skillInstaller = installer();
-  const location = skillInstaller.detect();
-  if (!location) {
-    process.stdout.write(
-      "⚠ Codex skill directory not detected (~/.codex not found).\n" +
-        "  Skipping optional skill — AGENTS.md integration keeps working.\n",
-    );
-    return 0;
-  }
+export interface SkillCommandDeps {
+  readonly home?: string;
+}
 
+function runForEach(options: GlobalOptions, action: "install" | "remove", home: string): TargetResult[] {
   const skill = glmDelegationSkill();
-  if (skillInstaller.isInstalled(skill.name) && !options.force) {
-    process.stdout.write(`✓ Skill "${skill.name}" already installed\n`);
-    return 0;
+  const results: TargetResult[] = [];
+  for (const { agent, installer } of skillTargets(home)) {
+    const location = installer.detect();
+    if (!location) {
+      results.push({ agent, outcome: "skipped", detail: "home not detected — skipping optional skill" });
+      continue;
+    }
+    if (action === "install") {
+      if (installer.isInstalled(skill.name) && !options.force) {
+        results.push({ agent, outcome: "already", detail: `already installed at ${location.skillsDir}` });
+        continue;
+      }
+      if (options.dryRun) {
+        results.push({ agent, outcome: "skipped", detail: `[dry-run] would install to ${location.skillsDir}` });
+        continue;
+      }
+      installer.install(skill);
+      results.push({ agent, outcome: "installed", detail: `installed at ${location.skillsDir}` });
+    } else {
+      if (!installer.isInstalled(skill.name)) {
+        results.push({ agent, outcome: "absent", detail: "not installed" });
+        continue;
+      }
+      if (options.dryRun) {
+        results.push({ agent, outcome: "skipped", detail: "[dry-run] would remove skill" });
+        continue;
+      }
+      installer.remove(skill.name);
+      results.push({ agent, outcome: "removed", detail: "removed" });
+    }
   }
+  return results;
+}
 
-  if (options.dryRun) {
-    process.stdout.write(`[dry-run] would install skill "${skill.name}" to ${location.skillsDir}\n`);
-    return 0;
+function render(results: readonly TargetResult[]): number {
+  for (const result of results) {
+    process.stdout.write(`✓ ${result.agent}: ${result.detail}\n`);
   }
-
-  skillInstaller.install(skill);
-  process.stdout.write(`✓ Skill "${skill.name}" installed at ${location.skillsDir}\n`);
   return 0;
 }
 
-/** glm-router skill remove. */
-export function skillRemoveCommand(options: GlobalOptions): number {
-  const skillInstaller = installer();
-  const skill = glmDelegationSkill();
-  if (!skillInstaller.isInstalled(skill.name)) {
-    process.stdout.write(`✓ Skill "${skill.name}" is not installed\n`);
-    return 0;
-  }
-  if (options.dryRun) {
-    process.stdout.write(`[dry-run] would remove skill "${skill.name}"\n`);
-    return 0;
-  }
-  skillInstaller.remove(skill.name);
-  process.stdout.write(`✓ Skill "${skill.name}" removed\n`);
-  return 0;
+/**
+ * glm-router skill install (spec §27, specs/v1-architecture.md): optional
+ * enhancement for BOTH agents; per-agent warn+skip, never fatal.
+ */
+export function skillInstallCommand(options: GlobalOptions, deps: SkillCommandDeps = {}): number {
+  return render(runForEach(options, "install", deps.home ?? os.homedir()));
+}
+
+/** glm-router skill remove — removes from both agents. */
+export function skillRemoveCommand(options: GlobalOptions, deps: SkillCommandDeps = {}): number {
+  return render(runForEach(options, "remove", deps.home ?? os.homedir()));
 }

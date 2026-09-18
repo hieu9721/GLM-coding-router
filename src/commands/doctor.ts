@@ -6,7 +6,7 @@ import { isWindows, windowsVersionName } from "../core/platform.js";
 import { resolveZaiApiKey, type ZaiKeySource } from "../core/zai-key.js";
 import { configPath } from "../core/paths.js";
 import fs from "node:fs";
-import { CodexSkillInstaller } from "../integrations/skill.js";
+import { skillTargets } from "../integrations/skill.js";
 import { GLM_DELEGATION_SKILL_NAME } from "../templates/glm-delegation-skill.js";
 
 export type CheckStatus = "ok" | "warn" | "fail";
@@ -169,21 +169,22 @@ export function runDoctorChecks(
       config.integrations.codex ? "enabled" : "disabled in config",
     ),
   );
-  const skillInstaller = new CodexSkillInstaller(home);
-  const skillDetected = skillInstaller.detect() !== null;
-  const skillInstalled = skillDetected && skillInstaller.isInstalled(GLM_DELEGATION_SKILL_NAME);
-  results.push(
-    check(
-      "Codex",
-      "Delegation skill",
-      skillInstalled ? "ok" : "warn",
-      skillInstalled
-        ? "installed"
-        : skillDetected
-          ? "not installed (optional)"
-          : "Codex home not detected — skill skipped (optional)",
-    ),
-  );
+  for (const { agent, installer } of skillTargets(home)) {
+    const homeDetected = installer.detect() !== null;
+    const skillInstalled = homeDetected && installer.isInstalled(GLM_DELEGATION_SKILL_NAME);
+    results.push(
+      check(
+        agent,
+        "Delegation skill",
+        skillInstalled ? "ok" : "warn",
+        skillInstalled
+          ? "installed"
+          : homeDetected
+            ? "not installed (optional)"
+            : `${agent} home not detected — skill skipped (optional)`,
+      ),
+    );
+  }
 
   // --- Environment: the Orca stale-env case (spec §9, §10) ---
   const hasProcessKey = Boolean(env.ZAI_API_KEY && env.ZAI_API_KEY.trim());
