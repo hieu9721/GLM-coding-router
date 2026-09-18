@@ -1,7 +1,8 @@
 /**
  * Fake agent executable (spec §47 integration tests).
- * Dumps {args, env, cwd} as JSON to the file in GLM_TEST_OUTPUT,
- * then exits with GLM_TEST_EXIT (default 0).
+ * Dumps {args, env, cwd} as JSON to the file in GLM_TEST_OUTPUT, echoes
+ * GLM_TEST_RESULT to stdout (claude-style result JSON for benchmark), then
+ * exits with GLM_TEST_EXIT (default 0).
  */
 import fs from "node:fs";
 
@@ -21,5 +22,8 @@ if (output) {
     cwd: process.cwd(),
   };
   fs.writeFileSync(output, JSON.stringify(dump, null, 2), "utf8");
+}
+if (process.env.GLM_TEST_RESULT) {
+  process.stdout.write(process.env.GLM_TEST_RESULT);
 }
 process.exit(Number(process.env.GLM_TEST_EXIT ?? 0));

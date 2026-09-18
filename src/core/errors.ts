@@ -130,6 +130,14 @@ export const Errors = {
       exitCode: ExitCode.InvalidArgs,
     }),
 
+  invalidArgs: (detail: string, hint?: readonly string[]): GlmRouterError =>
+    new GlmRouterError({
+      name: "INVALID_ARGS",
+      message: detail,
+      hint: hint && hint.length > 0 ? hint : undefined,
+      exitCode: ExitCode.InvalidArgs,
+    }),
+
   gitNotFound: (): GlmRouterError =>
     new GlmRouterError({
       name: "GIT_NOT_FOUND",

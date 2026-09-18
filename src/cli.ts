@@ -14,6 +14,7 @@ import { projectRemoveCommand } from "./commands/project-remove.js";
 import { skillInstallCommand, skillRemoveCommand } from "./commands/skill.js";
 import { uninstallCommand } from "./commands/uninstall.js";
 import { delegateCommand } from "./commands/delegate.js";
+import { benchmarkCommand } from "./commands/benchmark.js";
 
 const program = new Command();
 
@@ -111,6 +112,17 @@ program
   .option("--remove", "remove the worktree after a successful run (branch is always kept)")
   .action((name: string, prompt: string[], commandOptions: { profile?: string; remove?: boolean }) =>
     execute(() => delegateCommand(name, prompt, { ...globalOptions(), ...commandOptions })),
+  );
+
+program
+  .command("benchmark")
+  .description("measure the Claude+GLM stack on built-in coding tasks (makes real GLM calls)")
+  .option("--task <id>", "run only this task (repeatable)", (value: string, previous: string[]) => previous.concat([value]), [])
+  .option("--stack <name>", "orchestration stack (default claude; codex not yet supported)")
+  .option("--max-turns <n>", "worker --max-turns override", (value: string) => Number(value))
+  .option("--repeat <n>", "run each task N times", (value: string) => Number(value))
+  .action((commandOptions: { task?: string[]; stack?: string; maxTurns?: number; repeat?: number }) =>
+    execute(() => benchmarkCommand({ ...globalOptions(), ...commandOptions })),
   );
 
 program

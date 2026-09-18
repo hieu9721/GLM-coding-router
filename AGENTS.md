@@ -25,8 +25,8 @@ Claude Code / Codex → shell command → glm-chat / glm-worker / glm-review →
 ```
 
 - `src/cli.ts` — main CLI entry (`glm-router`), built with commander. Each subcommand
-  (`init`, `doctor`, `status`, `key`, `config`, `delegate`, `project`, `skill`, `uninstall`)
-  lives in `src/commands/` and is wired here.
+  (`init`, `doctor`, `status`, `key`, `config`, `delegate`, `benchmark`, `project`, `skill`,
+  `uninstall`) lives in `src/commands/` and is wired here.
 - `src/bin/{glm-chat,glm-fast,glm-worker,glm-review}.ts` — the four thin task binaries that
   resolve the Z.ai key, locate `claude.exe`, build the injected env, and spawn the child process.
   `glm-chat` is interactive; `glm-fast` is interactive pinned to the fast model; `glm-worker`
@@ -45,8 +45,9 @@ Claude Code / Codex → shell command → glm-chat / glm-worker / glm-review →
 - `src/project/` — the managed-block engine: `managed-block.ts` (parse/insert/replace between
   markers), `managed-file.ts`, `project-root.ts` (`git rev-parse --show-toplevel` with cwd
   fallback), `atomic-write.ts` (tmp file + rename), `ownership.ts`.
-- `src/templates/` — the managed-block content (`claude-block.ts`, `agents-block.ts`) and the
-  `glm-delegation` SKILL.md content.
+- `src/templates/` — the managed-block content (`claude-block.ts`, `agents-block.ts`), the
+  `glm-delegation` SKILL.md content, and the built-in benchmark task suite
+  (`benchmark-tasks.ts`, see `specs/benchmark.md`).
 - `tests/{unit,integration,fixtures}` — integration tests exercise the real command surface
   against `tests/fixtures/fake-agent.mjs` standing in for `claude.exe`.
 

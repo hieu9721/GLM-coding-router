@@ -200,6 +200,39 @@ glm-router delegate backend "Task A"   # terminal 1
 glm-router delegate tests "Task B"     # terminal 2
 ```
 
+## benchmark
+
+Measure the Claude Code + GLM stack on built-in coding tasks (spec §54 v0.4).
+Each task runs in a throwaway temp directory: the router writes the task files,
+spawns the standard GLM worker (same env injection, plus `--output-format json`
+to capture the result document), then runs the task's validation command:
+
+```powershell
+glm-router benchmark --yes                 # both built-in tasks, 1 run each
+glm-router benchmark --yes --task fn-reverse --repeat 3
+glm-router benchmark --yes --max-turns 15
+```
+
+Report (per task × run): **duration**, **GLM calls** (assistant turns),
+**retries** (`-` — not exposed by Claude Code yet), **tokens in/out**,
+**tests** (PASS/FAIL of `node test.js`), **success**, **intervention**
+(`needed` when the run did not self-complete). The full JSON report is always
+saved to `%USERPROFILE%\.glm-coding-router\benchmarks\benchmark-<timestamp>.json`
+and `--json` also prints it.
+
+Built-in tasks: `fn-reverse` (implement `reverseWords` until the test passes),
+`fix-bug` (repair an even-length `median` bug).
+
+Notes:
+- Benchmarking makes **real GLM API calls** — interactive runs ask for
+  confirmation; non-interactive runs require `--yes`.
+- Failed tasks are measurements, not errors: the command exits 0 once the
+  suite ran. Missing key/claude or a broken spawn still fail with the usual
+  `ERROR [10]/[20]/[40]`.
+- `--stack codex` is recognized but not supported yet (headless Codex
+  orchestration isn't drivable today); the harness is stack-shaped so it can
+  be added later.
+
 ## CLI reference
 
 ```text
@@ -211,6 +244,7 @@ glm-router key check         key configured? from which source?
 glm-router config show
 glm-router config set models.main glm-5.3
 glm-router delegate <name>   run a GLM worker in an isolated git worktree
+glm-router benchmark         measure the Claude+GLM stack on built-in tasks
 glm-router project init      CLAUDE.md / AGENTS.md managed blocks (--dry-run supported)
 glm-router project remove
 glm-router skill install     optional Codex delegation skill
