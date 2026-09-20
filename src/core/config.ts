@@ -85,6 +85,14 @@ export const ConfigSchema = z.object({
 
   // Named overlays selected via --profile (specs/glm-fast-profiles.md).
   profiles: z.record(z.string(), ProfileSchema).default({}),
+
+  // Run-history retention (specs/v2-architecture.md, Phase B / Config v2).
+  // The whole section is defaulted so every v1 config still validates;
+  // `routing` and `ui` arrive in later phases.
+  history: z.object({
+    retentionDays: z.number().int().positive(),
+    maxRuns: z.number().int().positive(),
+  }).default({ retentionDays: 30, maxRuns: 1000 }),
 });
 
 export type RouterConfig = z.infer<typeof ConfigSchema>;
@@ -108,6 +116,7 @@ export function defaultConfig(): RouterConfig {
       codexSkill: true,
     },
     profiles: {},
+    history: { retentionDays: 30, maxRuns: 1000 },
   };
 }
 
