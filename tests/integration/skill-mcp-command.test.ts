@@ -95,8 +95,12 @@ describe("dual-target skill (specs/v1-architecture.md)", () => {
 
     const out = captureStdout();
     statusCommand({}, { home, env: {} as NodeJS.ProcessEnv, readUserEnv: () => undefined });
-    expect(out.text()).toContain("Claude skill     enabled");
-    expect(out.text()).toContain("Codex skill     enabled");
+    // Presence, not padding: the column alignment itself is guarded by
+    // "aligns every label/value pair to the same column" in status.test.ts.
+    // This assertion used to pin the old 5-space run, which locked in the
+    // one-column drift of the Claude row.
+    expect(out.text()).toMatch(/^Claude skill\s+enabled$/m);
+    expect(out.text()).toMatch(/^Codex skill\s+enabled$/m);
 
     const report = runDoctorChecks({ home, env: {} as NodeJS.ProcessEnv, readUserEnv: () => undefined });
     const skillChecks = report.results.filter((result) => result.name === "Delegation skill");

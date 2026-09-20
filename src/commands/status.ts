@@ -59,6 +59,8 @@ export function statusCommand(options: GlobalOptions, deps: StatusDeps = {}): nu
     return 0;
   }
 
+  /** Every status row pads its label to this column (spec §41). */
+  const LABEL_WIDTH = 16;
   const lines = [
     `GLM Coding Router v${version}`,
     "",
@@ -71,7 +73,7 @@ export function statusCommand(options: GlobalOptions, deps: StatusDeps = {}): nu
   ];
   for (const row of skillState) {
     const enabled = row.homeDetected && row.installed;
-    lines.push(`${row.agent} skill     ${enabled ? "enabled" : "disabled"}`);
+    lines.push(`${`${row.agent} skill`.padEnd(LABEL_WIDTH)}${enabled ? "enabled" : "disabled"}`);
   }
   lines.push(
     "",

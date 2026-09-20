@@ -17,7 +17,7 @@ import {
   validateDelegateName,
 } from "../core/worktree.js";
 import { resolveZaiApiKey } from "../core/zai-key.js";
-import { aggregateLocalUsage, fetchZaiQuota } from "../commands/usage.js";
+import { aggregateLocalUsage, describeWindow, fetchZaiQuota } from "../commands/usage.js";
 
 /**
  * glm-mcp (specs/v1-architecture.md): the router exposed as MCP tools over
@@ -182,7 +182,7 @@ async function usage(deps: McpDeps): Promise<McpToolResult> {
     lines.push(`Z.ai Coding Plan${quota.level ? ` (level: ${quota.level})` : ""}`);
     for (const limit of quota.limits ?? []) {
       const resets = typeof limit.nextResetTime === "number" ? ` — resets ${new Date(limit.nextResetTime).toISOString()}` : "";
-      lines.push(`  ${String(limit.number ?? "?")}x unit ${String(limit.unit ?? "?")}: ${String(limit.currentValue ?? "?")} / ${String(limit.usage ?? "?")} credits (${String(limit.percentage ?? "?")}%)${resets}`);
+      lines.push(`  ${describeWindow(limit).padEnd(15)} ${String(limit.currentValue ?? "?")} / ${String(limit.usage ?? "?")} credits (${String(limit.percentage ?? "?")}%)${resets}`);
     }
   } catch (error) {
     isError = true;

@@ -107,4 +107,25 @@ describe("statusCommand (spec §41: quick, fully offline)", () => {
 
     expect(out.text()).not.toContain("super-secret-value");
   });
+
+  it("aligns every label/value pair to the same column (spec §41)", () => {
+    const home = temp();
+    const emptyPath = temp();
+    const out = captureStdout();
+
+    statusCommand({}, { home, env: isolatedEnv([emptyPath]), readUserEnv: () => undefined });
+
+    const checked = out
+      .text()
+      .split("\n")
+      .filter((line) => /^(\S.*?)\s{2,}(\S.*)$/.test(line));
+    expect(checked.some((line) => line.startsWith("Claude skill"))).toBe(true);
+    expect(checked.some((line) => line.startsWith("Codex skill"))).toBe(true);
+
+    const columns = checked.map((line) => {
+      const [, , value] = line.match(/^(\S.*?)\s{2,}(\S.*)$/)!;
+      return line.indexOf(value);
+    });
+    expect([...new Set(columns)]).toEqual([16]);
+  });
 });

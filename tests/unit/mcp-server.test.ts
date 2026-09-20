@@ -225,4 +225,32 @@ describe("callMcpTool handlers (specs/v1-architecture.md)", () => {
       removeTempDir(dir);
     }
   });
+
+  it("glm_usage labels windows via describeWindow instead of raw unit numbers", async () => {
+    const payload = {
+      code: 200,
+      data: {
+        level: "lite",
+        limits: [
+          { unit: 3, number: 5, currentValue: 1, usage: 2000, percentage: 1 },
+          { unit: 6, number: 1, currentValue: 4331, usage: 10000, percentage: 43 },
+        ],
+      },
+    };
+    const home = makeTempDir("glm-mcp-window-");
+    try {
+      const result = await callMcpTool("glm_usage", {}, {
+        home,
+        env: { ZAI_API_KEY: "k" } as NodeJS.ProcessEnv,
+        readUserEnv: () => undefined,
+        fetchImpl: (async () => new Response(JSON.stringify(payload), { status: 200 })) as typeof fetch,
+      });
+      expect(result.isError).toBe(false);
+      expect(result.text).toContain("5-hour window");
+      expect(result.text).toContain("weekly");
+      expect(result.text).not.toContain("unit 3");
+    } finally {
+      removeTempDir(home);
+    }
+  });
 });

@@ -42,7 +42,7 @@ interface LocalUsage {
 }
 
 /** Window labels for the observed enum values (specs/usage.md); unknown values stay generic. */
-function describeWindow(limit: ZaiLimit): string {
+export function describeWindow(limit: ZaiLimit): string {
   if (limit.unit === 3 && typeof limit.number === "number") {
     return `${limit.number}-hour window`;
   }
