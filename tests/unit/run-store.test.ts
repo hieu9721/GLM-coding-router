@@ -190,4 +190,29 @@ describe("run store (specs/v2-architecture.md Phase B)", () => {
       expect(Object.keys(event)).not.toContain("thinking");
     }
   });
+
+  it("accumulates across a run that carries several result messages", () => {
+    // Observed live on 2026-09-20: a child that hits --max-turns and continues
+    // emits one result per segment. Overwriting made a 21-minute, 64-turn run
+    // persist as "88s, 5 turns" — the summary contradicted its own TurnStarted
+    // events. Each result covers only its segment, so they accumulate, and the
+    // derived turn count wins when it is larger.
+    const bus = createEventBus("run_multi");
+    const events: WorkerEvent[] = [];
+    const collect = (e: WorkerEvent): void => void events.push(e);
+    bus.subscribe(collect);
+    for (let turn = 1; turn <= 64; turn++) {
+      bus.emit({ type: "TurnStarted", turn });
+    }
+    bus.emit({ type: "RunFailed", reason: "max_turns", exitCode: 1 });
+    bus.emit({ type: "RunCompleted", turns: 0, durationMs: 123, filesChanged: 0, tokensIn: 0, tokensOut: 0 });
+    bus.emit({ type: "RunCompleted", turns: 5, durationMs: 88_074, filesChanged: 0, tokensIn: 4891, tokensOut: 3851 });
+
+    const summary = summarize(events);
+    expect(summary.turns).toBe(64);
+    expect(summary.durationMs).toBeGreaterThanOrEqual(88_074 + 123);
+    expect(summary.tokensIn).toBe(4891);
+    expect(summary.tokensOut).toBe(3851);
+    expect(summary.state).toBe("COMPLETED");
+  });
 });

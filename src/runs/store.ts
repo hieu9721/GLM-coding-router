@@ -147,6 +147,8 @@ export function readEvents(runDirPath: string): WorkerEvent[] {
 export function summarize(events: readonly WorkerEvent[]): RunSummary {
   let state: RunOutcome = "CRASHED";
   let turns = 0;
+  let resultTurns = 0;
+  let resultDurationMs = 0;
   let durationMs = 0;
   let tokensIn = 0;
   let tokensOut = 0;
@@ -180,10 +182,16 @@ export function summarize(events: readonly WorkerEvent[]): RunSummary {
         break;
       case "RunCompleted":
         state = "COMPLETED";
-        turns = event.turns;
-        durationMs = event.durationMs;
-        tokensIn = event.tokensIn;
-        tokensOut = event.tokensOut;
+        // A run can carry MORE THAN ONE result message: a child that hits
+        // --max-turns and continues emits one per segment. Observed live on
+        // 2026-09-20 — RunFailed(max_turns), then two RunCompleted — where
+        // overwriting made a 21-minute, 64-turn run persist as "88s, 5 turns".
+        // Each result describes only its own segment, so accumulate, and let
+        // the derived turn count win when it is larger.
+        resultTurns += event.turns;
+        resultDurationMs += event.durationMs;
+        tokensIn += event.tokensIn;
+        tokensOut += event.tokensOut;
         break;
       case "RunFailed":
         state = "FAILED";
@@ -196,12 +204,14 @@ export function summarize(events: readonly WorkerEvent[]): RunSummary {
     }
   }
 
-  if (durationMs === 0 && events.length > 0) {
-    const span = Date.parse(events[events.length - 1].ts) - Date.parse(events[0].ts);
-    if (Number.isFinite(span) && span > 0) {
-      durationMs = span;
-    }
-  }
+  // The wall clock is the span of the stream; a sum of per-segment result
+  // durations misses the gaps between them. Take whichever is larger so a
+  // long run can never be reported as a short one.
+  const span = events.length > 0
+    ? Date.parse(events[events.length - 1].ts) - Date.parse(events[0].ts)
+    : 0;
+  durationMs = Math.max(resultDurationMs, Number.isFinite(span) && span > 0 ? span : 0);
+  turns = Math.max(turns, resultTurns);
 
   return {
     id: events.length > 0 ? events[0].runId : "",
