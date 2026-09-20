@@ -19,20 +19,33 @@ export function readStdin(): Promise<string | undefined> {
 
 /**
  * Resolve the task prompt (spec §15, §40):
- *   stdin text → joined arguments → error
+ *   arguments → stdin text → error
+ *
+ * Arguments are checked FIRST, and when they carry a prompt stdin is never
+ * awaited. The original order was stdin-first, which hangs forever whenever
+ * stdin is an open pipe that never reaches EOF — the normal shape under an
+ * agent harness, a CI runner or `nohup`. Measured on Windows: with stdin held
+ * open, `glm-worker "Reply exactly with X"` did nothing at all — no run
+ * directory, no API call, no output — until the pipe closed 25 s later, then
+ * completed in 7 s. A prompt in argv is an explicit instruction and must not
+ * wait on a stream that may never close.
+ *
+ * Piping a task packet still works exactly as before: with no arguments,
+ * blocking until EOF is the correct thing to do, because there is nothing
+ * else to run.
  */
 export async function resolvePrompt(
   argv: readonly string[],
   readStdinFn: () => Promise<string | undefined> = readStdin,
   command = "glm-worker",
 ): Promise<string> {
-  const stdinText = await readStdinFn();
-  if (stdinText !== undefined && stdinText.trim().length > 0) {
-    return stdinText;
-  }
   const argText = argv.join(" ").trim();
   if (argText.length > 0) {
     return argText;
+  }
+  const stdinText = await readStdinFn();
+  if (stdinText !== undefined && stdinText.trim().length > 0) {
+    return stdinText;
   }
   throw Errors.promptRequired(command);
 }

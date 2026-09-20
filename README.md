@@ -122,7 +122,9 @@ go test ./internal/auth/...
 "@ | glm-worker
 ```
 
-Input priority: **stdin → arguments → error**. The worker runs with
+Input priority: **arguments → stdin → error**. Arguments win, and stdin is not even
+read when they carry a prompt — waiting for EOF on a pipe that never closes (an agent
+harness, CI, `nohup`) would hang the run before it started. The worker runs with
 `--max-turns 20 --permission-mode acceptEdits --tools Read,Glob,Grep,Edit,Write,Bash`.
 It never uses `--dangerously-skip-permissions`.
 
@@ -190,7 +192,7 @@ your work; the footer prints the path and the merge command:
 [glm-router] next: inspect it, then merge glm/delegate/backend (or discard with git worktree remove)
 ```
 
-- Prompt priority is stdin → arguments, same as `glm-worker`.
+- Prompt priority is arguments → stdin, same as `glm-worker`.
 - Profiles: `--profile test` explicitly, or — when omitted — a profile literally
   named after the delegate (`delegate test` → the `test` profile) if one exists.
 - `--remove` deletes the worktree **after a successful run only**; plain

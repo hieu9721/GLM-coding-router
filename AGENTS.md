@@ -104,7 +104,7 @@ Integration tests spawn `tests/fixtures/fake-agent.mjs` through `node.exe` to ve
 - The worker's Bash access is an explicit allowlist (`worker.allowedBash`, `specs/worker-bash-permissions.md`): validation commands only, never git writes / `rm` / network / installs. `acceptEdits` alone denies **every** Bash call in headless mode, so the allowlist is what makes the tool usable — removing it silently disables validation.
 - The Z.ai key lives in the platform's own per-user store (`src/core/user-env.ts`): Windows User Environment, macOS keychain, or libsecret when `secret-tool` exists. Where there is none, the tool **prints guidance and never invents a file of its own** — the key is still never written anywhere this package owns.
 - Child processes inherit cwd/stdio, forward SIGINT (Ctrl+C must reach child claude), propagate exit code.
-- Prompt input priority: stdin (when not a TTY) → args → error (`src/core/prompt.ts`).
+- Prompt input priority: args → stdin (when not a TTY) → error (`src/core/prompt.ts`). Args are checked first and stdin is never awaited when they carry a prompt: stdin-first deadlocks whenever the pipe never reaches EOF, which is the normal shape under an agent harness or CI.
 - Claude binary discovery (`src/core/claude.ts`): `where.exe claude` → PATH search → config override → error. Don't assume `claude.cmd`; standalone installs expose `claude.exe`. Codex absence is a WARN, not fatal (Claude-only setups must work).
 
 ## Implementation order (spec §56)
