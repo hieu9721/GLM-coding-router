@@ -96,8 +96,15 @@ export function runsCommand(options: GlobalOptions & RunsListOptions, deps: Runs
   return 0;
 }
 
-/** History rows: the registry's refs plus the model/cwd only `events.jsonl` knows. */
+/**
+ * History rows: the registry's refs plus the model/cwd only `events.jsonl`
+ * knows. A run that is still going appears here too — its directory exists
+ * from the first event — and would read as CRASHED, because its stream has
+ * no terminal event yet. The active file is the live truth, so its state
+ * overrides the derived one.
+ */
 function historyRows(home: string, limit: number): RunRow[] {
+  const live = new Map(listActive(home).map((run) => [run.id, run.state]));
   return listHistory(home)
     .slice(0, limit)
     .map((ref) => {
@@ -105,7 +112,7 @@ function historyRows(home: string, limit: number): RunRow[] {
       return {
         id: ref.id,
         date: ref.date,
-        state: ref.state,
+        state: live.get(ref.id) ?? ref.state,
         kind: ref.kind,
         model: start.model,
         startedAt: ref.startedAt,
@@ -403,21 +410,33 @@ function resolveRun(home: string, input: string): ResolvedRun {
 
   const suffixActive = activeRuns.filter((run) => run.id.endsWith(input));
   const suffixRefs = refs.filter((ref) => ref.id.endsWith(input));
-  const total = suffixActive.length + suffixRefs.length;
-  if (total === 0) {
+  // A LIVE run appears in both lists — its history directory exists from the
+  // first event, while its active file still exists too — so counting both
+  // made `runs show <suffix>` report every running run as ambiguous with
+  // itself. Candidates are unique run ids, not list entries.
+  const candidateIds = [...new Set([...suffixActive, ...suffixRefs].map((c) => c.id))];
+  if (candidateIds.length === 0) {
     throw Errors.invalidArgs(`no run found with id "${input}"`, [`Run "glm-router runs" to list recorded runs.`]);
   }
-  if (total > 1) {
+  if (candidateIds.length > 1) {
     throw Errors.invalidArgs(
-      `run id "${input}" is ambiguous — ${total} recorded runs end with it:`,
-      [...suffixActive, ...suffixRefs].map((candidate) => candidate.id),
+      `run id "${input}" is ambiguous — ${candidateIds.length} recorded runs end with it:`,
+      candidateIds,
     );
   }
-  if (suffixActive.length === 1) {
-    const run = suffixActive[0];
-    return { id: run.id, date: run.date, dir: runDir(home, run.date, run.id), active: run, ref: null };
+  const id = candidateIds[0];
+  // Prefer the active entry: it carries the live state the history ref lacks.
+  const run = suffixActive.find((candidate) => candidate.id === id);
+  if (run !== undefined) {
+    return {
+      id: run.id,
+      date: run.date,
+      dir: runDir(home, run.date, run.id),
+      active: run,
+      ref: suffixRefs.find((candidate) => candidate.id === id) ?? null,
+    };
   }
-  const ref = suffixRefs[0];
+  const ref = suffixRefs.find((candidate) => candidate.id === id)!;
   return { id: ref.id, date: ref.date, dir: runDir(home, ref.date, ref.id), active: null, ref };
 }
 

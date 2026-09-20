@@ -386,6 +386,51 @@ describe("runsShowCommand (specs/v2-architecture.md Phase G)", () => {
     expect(out.text()).toContain(TITLE_A);
   });
 
+  it("lists a live run as RUNNING, not CRASHED", () => {
+    // Its history directory exists from the first event and its stream has no
+    // terminal event yet, so the derived state is CRASHED. The active file is
+    // the live truth and must win, or the listing reports every running run as
+    // a crash.
+    const home = temp();
+    seedRun(home, {
+      id: ID_A,
+      date: DATE,
+      cwd: CWD_A,
+      taskTitle: TITLE_A,
+      events: crashedEvents(CWD_A, TITLE_A),
+      active: { state: "RUNNING", heartbeatAt: "2026-09-20T10:00:30.000Z" },
+    });
+
+    const out = captureStdout();
+    expect(runsCommand({}, { home })).toBe(0);
+    expect(out.text()).toContain("RUNNING");
+    expect(out.text()).not.toContain("CRASHED");
+  });
+
+  it("a LIVE run resolves by suffix instead of being ambiguous with itself", () => {
+    // A running run is in both lists at once: its history directory exists
+    // from the first event, and its active file has not been removed yet.
+    // Counting list entries instead of distinct ids made `runs show <suffix>`
+    // reject every running run as ambiguous — found while watching a real
+    // delegation on 2026-09-20.
+    const home = temp();
+    seedRun(home, {
+      id: ID_A,
+      date: DATE,
+      cwd: CWD_A,
+      taskTitle: TITLE_A,
+      events: crashedEvents(CWD_A, TITLE_A),
+      active: { state: "RUNNING", heartbeatAt: "2026-09-20T10:00:30.000Z" },
+    });
+
+    const out = captureStdout();
+    const code = runsShowCommand("0000AA", {}, { home });
+
+    expect(code).toBe(0);
+    expect(out.text()).toContain(TITLE_A);
+    expect(out.text()).toContain("RUNNING");
+  });
+
   it("an ambiguous suffix is INVALID_ARGS and names every candidate", () => {
     const home = temp();
     seedRun(home, { id: ID_AMBIG_1, date: DATE, cwd: CWD_A, taskTitle: "One", events: crashedEvents(CWD_A, "One") });

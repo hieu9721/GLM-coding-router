@@ -503,4 +503,42 @@ describe("claude adapter (specs/v2-architecture.md Phase A)", () => {
       }
     });
   });
+
+  describe("validation detection is anchored to command segments", () => {
+    const detect = (command: string): boolean => {
+      const state = createAdapterState("/repo");
+      const events = adaptClaudeMessage(
+        {
+          type: "assistant",
+          message: {
+            content: [
+              { type: "tool_use", id: "call_x", name: "Bash", input: { command } },
+            ],
+          },
+        },
+        state,
+      );
+      return events.some((event) => event.type === "ValidationStarted");
+    };
+
+    it("does not fire on a filename that merely contains a runner name", () => {
+      // Seen live on 2026-09-20: `ls eslint.config.* vitest.config.*` was
+      // rendered as "running tests" and then "✓ tests passed".
+      expect(detect("ls eslint.config.* vitest.config.*")).toBe(false);
+      expect(detect("cat vitest.config.ts")).toBe(false);
+      expect(detect("rm -rf node_modules/.vitest")).toBe(false);
+    });
+
+    it("fires when a runner starts the command", () => {
+      expect(detect("npm test")).toBe(true);
+      expect(detect("npx vitest run tests/unit/x.test.ts")).toBe(true);
+      expect(detect("pytest -q")).toBe(true);
+      expect(detect("python3 test_add.py")).toBe(true);
+    });
+
+    it("fires when a runner starts a later segment of a pipeline", () => {
+      expect(detect('echo hi && npm test')).toBe(true);
+      expect(detect('npm test 2>&1 | tail -5')).toBe(true);
+    });
+  });
 });

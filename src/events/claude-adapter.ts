@@ -28,9 +28,24 @@ const SUMMARY_MAX_CHARS = 120;
  */
 const HEARTBEAT_MIN_INTERVAL_MS = 1000;
 
-/** Validation allowlist, exact from the spec (Phase A). */
-const VALIDATION_COMMAND =
-  /(npm|pnpm|yarn) (run )?(test|lint|typecheck)|vitest|jest|go test|pytest|cargo test|tsc\b|python3? (-m (pytest|unittest)\b|\S*test\S*\.py)/;
+/**
+ * A command counts as validation only when a runner starts one of its
+ * segments. The pattern used to match anywhere in the string, so
+ * `ls eslint.config.* vitest.config.*` was reported as a test run purely
+ * because a FILENAME contained "vitest" (seen live on 2026-09-20).
+ */
+const VALIDATION_SEGMENT =
+  /^(npm|pnpm|yarn) (run )?(test|lint|typecheck)\b|^npx \s*(vitest|jest)\b|^(vitest|jest|pytest|tsc)\b|^go test\b|^cargo test\b|^python3? (-m (pytest|unittest)\b|\S*test\S*\.py)/;
+
+/** Shell operators that separate one executed command from the next. */
+const SEGMENT_SPLIT = /&&|\|\||;|\|/;
+
+/** True when any segment of the command line starts with a test/lint runner. */
+function isValidationCommand(command: string): boolean {
+  return command
+    .split(SEGMENT_SPLIT)
+    .some((segment) => VALIDATION_SEGMENT.test(segment.trim()));
+}
 
 /** Tools whose ok completion changes a file, and therefore emits `FileChanged`. */
 const FILE_TOOLS = new Set(["Edit", "Write", "MultiEdit"]);
@@ -309,7 +324,7 @@ function mapToolUse(
   const input = isRecord(block.input) ? block.input : {};
   const command = asString(input.command);
   const summary = summarizeToolUse(tool, input, state.cwd);
-  const isValidation = tool === "Bash" && command !== undefined && VALIDATION_COMMAND.test(command);
+  const isValidation = tool === "Bash" && command !== undefined && isValidationCommand(command);
   const events: EventInput[] = [];
 
   // Turn derivation (A0): one turn per tool_result → next tool_use cycle.
