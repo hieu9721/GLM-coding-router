@@ -17,6 +17,8 @@ import { delegateCommand } from "./commands/delegate.js";
 import { benchmarkCommand } from "./commands/benchmark.js";
 import { usageCommand } from "./commands/usage.js";
 import { runsCleanCommand, runsCommand, runsLogsCommand, runsShowCommand } from "./commands/runs.js";
+import { watchCommand } from "./commands/watch.js";
+import { dashboardCommand } from "./commands/dashboard.js";
 import { mcpCommand } from "./commands/mcp.js";
 
 const program = new Command();
@@ -165,6 +167,22 @@ runs
   .option("--json", "machine-readable JSON output")
   .action((commandOptions: { olderThan?: string; orphans?: boolean; dryRun?: boolean; json?: boolean }) =>
     execute(() => Promise.resolve(runsCleanCommand({ ...globalOptions(), ...commandOptions }))),
+  );
+
+program
+  .command("watch [run-id]")
+  .description("attach to a running run and follow its progress live (newest active run by default)")
+  .option("--from-start", "render the events written before attaching, then follow")
+  .action((runId: string | undefined, commandOptions: { fromStart?: boolean }) =>
+    execute(() => watchCommand({ ...globalOptions(), runId, ...commandOptions })),
+  );
+
+program
+  .command("dashboard")
+  .description("quota + active runs + recent runs: one snapshot when piped, a live view on a TTY")
+  .option("--interval <seconds>", "repaint interval in seconds on a TTY (default 2)", (value: string) => Number(value))
+  .action((commandOptions: { interval?: number }) =>
+    execute(() => dashboardCommand({ ...globalOptions(), ...commandOptions })),
   );
 
 const mcp = program
