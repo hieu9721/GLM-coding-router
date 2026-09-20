@@ -88,11 +88,19 @@ export const ConfigSchema = z.object({
 
   // Run-history retention (specs/v2-architecture.md, Phase B / Config v2).
   // The whole section is defaulted so every v1 config still validates;
-  // `routing` and `ui` arrive in later phases.
+  // `routing` arrives in a later phase.
   history: z.object({
     retentionDays: z.number().int().positive(),
     maxRuns: z.number().int().positive(),
   }).default({ retentionDays: 30, maxRuns: 1000 }),
+
+  // Progress renderer defaults (specs/v2-architecture.md, Phase C / Config v2).
+  // Defaulted exactly like `history` so every v1 config still validates and
+  // schemaVersion stays 1; `mode: "auto"` means rich on a TTY, nested otherwise.
+  ui: z.object({
+    mode: z.enum(["auto", "rich", "nested", "off"]),
+    color: z.boolean(),
+  }).default({ mode: "auto", color: true }),
 });
 
 export type RouterConfig = z.infer<typeof ConfigSchema>;
@@ -117,6 +125,7 @@ export function defaultConfig(): RouterConfig {
     },
     profiles: {},
     history: { retentionDays: 30, maxRuns: 1000 },
+    ui: { mode: "auto", color: true },
   };
 }
 
