@@ -134,12 +134,18 @@ fiction for this stack. **Phase E's estimator ignores it; the quota delta stays 
 truth.** The *token* counts in `modelUsage` are real (they come from the API response) and
 may be used.
 
-**`src/events/types.ts`** — the canonical union (doc §4). Every event carries
-`{ runId, seq, ts }`; `seq` is assigned by the bus, monotonic per run.
+**`src/events/types.ts`** — the canonical union (doc §4). Every event carries the **H1**
+envelope `{ runId, taskId, provider, role, seq, ts }`; `seq` is assigned by the bus, monotonic
+per run, and `taskId` defaults to the `runId` while there is no task graph. `provider` is the
+canonical id `zai.zcode` (**H2**, settled by D5) — `"GLM"` is display text only and never
+reaches a persisted event. `role` is `"worker"` or `"reviewer"`.
+
+> The envelope is per-event and therefore also per-file in `events.jsonl`, which is the whole
+> point of H1: a v2-era history stays readable by v3/v4 without a migration pass.
 
 | Event | Payload beyond the envelope |
 |---|---|
-| `RunStarted` | `kind: "worker" \| "review" \| "delegate"`, `provider: "glm"`, `model`, `cwd`, `taskTitle`, `taskHash`, `parent: {type: "claude" \| "codex" \| "shell"}` |
+| `RunStarted` | `kind: "worker" \| "review" \| "delegate"` (which CLI surface — the vendor id lives in the envelope per H2), `model`, `cwd`, `taskTitle`, `taskHash`, `parent: {type: "claude" \| "codex" \| "shell"}` |
 | `AgentInitialized` | `sessionId`, `model`, `tools: string[]` |
 | `TurnStarted` | `turn: number` |
 | `ToolStarted` | `turn`, `toolUseId`, `tool`, `summary` (≤120 chars, redacted) |
@@ -156,8 +162,8 @@ may be used.
 | `RunCancelled` | `signal` |
 | `Heartbeat` | `state`, `turn` |
 
-**`src/events/bus.ts`** — ~40 lines: `createEventBus(runId)` with `emit(event)` (stamps
-`seq`/`ts`), `subscribe(fn)`, `close()`. Synchronous dispatch, subscriber exceptions are
+**`src/events/bus.ts`** — ~40 lines: `createEventBus(runId, { taskId?, role })` with
+`emit(event)` (stamps the whole H1 envelope), `subscribe(fn)`, `close()`. Synchronous dispatch, subscriber exceptions are
 caught and logged at debug level (a broken renderer must never kill a run).
 
 **`src/events/claude-adapter.ts`** — two exports:
@@ -303,7 +309,7 @@ map correctly, and the legacy path is chosen when `--output-format` is passed.
 
 ```ts
 interface BudgetSnapshot {
-  provider: "glm";
+  provider: "zai.zcode";   // canonical id (H2/D5) — "GLM" is display text only
   fiveHour: BudgetWindow;   // { used, limit, remaining, remainingRatio, resetAt }
   weekly:  BudgetWindow;
   confidence: "exact" | "cached" | "unknown";
