@@ -359,11 +359,11 @@ class RichRenderer implements EventRenderer {
     ];
     const prefix = `─ ${TITLE_BY_KIND[event.kind]} `;
     const inner = Math.max(...rows.map((row) => row.length), prefix.length);
-    this.writer.line(`╭${prefix}${"─".repeat(inner - prefix.length)}╮`);
+    this.writer.line(`╭${prefix}${"─".repeat(inner + 2 - prefix.length)}╮`);
     for (const row of rows) {
       this.writer.line(`│ ${row.padEnd(inner)} │`);
     }
-    this.writer.line(`╰${"─".repeat(inner)}╯`);
+    this.writer.line(`╰${"─".repeat(inner + 2)}╯`);
     this.writer.line();
   }
 

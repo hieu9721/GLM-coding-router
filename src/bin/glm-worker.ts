@@ -10,6 +10,7 @@ import { applyProfile, extractProfileFlag } from "../core/profile.js";
 import { resolvePrompt } from "../core/prompt.js";
 import { spawnAgent } from "../core/process.js";
 import { resolveZaiApiKey } from "../core/zai-key.js";
+import { runInstrumented, shouldObserve } from "../runs/worker-run.js";
 
 /** Worker tool surface (spec §16). */
 export const WORKER_TOOLS = "Read,Glob,Grep,Edit,Write,Bash";
@@ -90,12 +91,27 @@ export async function runWorker(argv: readonly string[]): Promise<number> {
   const env = createGlmEnv(config, resolved.key);
   logger.debug(redact(`spawning ${claudePath} ${args.join(" ")}`, [resolved.key]));
 
-  return spawnAgent(claudePath, {
+  // v2 spec Phase D (C4): observe unless the caller opted out or already asked
+  // for a specific --output-format. The legacy path stays byte-identical.
+  if (!shouldObserve(args, process.env)) {
+    return spawnAgent(claudePath, {
+      args,
+      cwd: process.cwd(),
+      env,
+      interactive: false,
+    });
+  }
+  const observed = await runInstrumented({
+    kind: "worker",
+    prompt,
     args,
+    claudePath,
+    config,
+    secrets: [resolved.key],
     cwd: process.cwd(),
     env,
-    interactive: false,
   });
+  return observed.code;
 }
 
 if (isMainModule(import.meta.url)) {

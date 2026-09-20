@@ -207,6 +207,14 @@ describe("progress renderer (specs/v2-architecture.md Phase C)", () => {
     progress.detach();
     const text = stream.text();
     expect(text).toContain("╭─ GLM Worker");
+
+    // The header box was shipped two characters short: rows render as
+    // "| " + content + " |" while the borders were drawn at content width.
+    // `toContain` on the opening glyphs could not see it, so pin the geometry.
+    const box = text.split("\n").filter((l) => /^[╭│╰]/.test(l));
+    expect(box.length).toBe(5);
+    const widths = new Set(box.map((l) => [...l].length));
+    expect(widths.size, `box lines are ragged: ${JSON.stringify(box)}`).toBe(1);
     expect(text).toContain("│ Project  goldenpen");
     expect(text).toContain("◉ Turn 1");
     expect(text).toContain("◉ Turn 2");

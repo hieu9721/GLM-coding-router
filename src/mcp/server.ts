@@ -1,4 +1,5 @@
 import os from "node:os";
+import { Writable } from "node:stream";
 import { buildWorkerArgs } from "../bin/glm-worker.js";
 import { buildReviewArgs } from "../bin/glm-review.js";
 import { loadConfig } from "../core/config.js";
@@ -17,6 +18,7 @@ import {
   validateDelegateName,
 } from "../core/worktree.js";
 import { resolveZaiApiKey } from "../core/zai-key.js";
+import { runInstrumented, shouldObserve } from "../runs/worker-run.js";
 import { aggregateLocalUsage, describeWindow, fetchZaiQuota } from "../commands/usage.js";
 
 /**
@@ -122,6 +124,47 @@ async function runAgent(prompt: string, profile: string | undefined, kind: "work
   }
   const claudePath = locateClaude(config, env);
   const args = kind === "worker" ? buildWorkerArgs(prompt, config) : buildReviewArgs(prompt, config);
+  // An injected `spawn` pins the v1 capture path: that caller owns child
+  // execution and expects the captured stdout/stderr (C4). Production passes
+  // none and observes by default.
+  if (deps.spawn === undefined && shouldObserve(args, env)) {
+    // C2 (v2 spec Phase D): MCP's stdout is the JSON-RPC channel, so the run is
+    // instrumented with the renderer off and both streams captured — the final
+    // text comes back as the tool result string, and the run still lands in the
+    // registry/history. is-error stays derived from the exit code, exactly like
+    // the capture path below.
+    let stdoutText = "";
+    let stderrText = "";
+    const stderr = new Writable({
+      write: (chunk: unknown, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void => {
+        stderrText += String(chunk);
+        callback();
+      },
+    });
+    const result = await runInstrumented({
+      kind,
+      prompt,
+      args,
+      claudePath,
+      config,
+      secrets: [resolved.key],
+      cwd: deps.cwd ?? process.cwd(),
+      env: createGlmEnv(config, resolved.key, env),
+      home,
+      progress: "off",
+      stdout: {
+        write: (text: string): void => {
+          stdoutText += text;
+        },
+      },
+      stderr,
+    });
+    const text = stdoutText.trim() || "(no output)";
+    if (result.code !== 0) {
+      return { text: `${text}\n[worker exited ${result.code}]${stderrText ? `\n${tail(stderrText.trim())}` : ""}`, isError: true };
+    }
+    return { text, isError: false };
+  }
   const spawn = deps.spawn ?? spawnAgentCapture;
   const captured = await spawn(claudePath, {
     args,
