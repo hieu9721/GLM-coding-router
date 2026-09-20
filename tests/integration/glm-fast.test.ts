@@ -77,7 +77,7 @@ describe("--profile wiring in arg builders (specs/glm-fast-profiles.md)", () => 
       { ...defaultConfig(), profiles: { test: { workerMaxTurns: 6 } } },
       "test",
     );
-    expect(buildWorkerArgs("task", config)).toEqual([
+    expect(buildWorkerArgs("task", config).slice(0, 8)).toEqual([
       "-p",
       "task",
       "--max-turns",
@@ -87,6 +87,8 @@ describe("--profile wiring in arg builders (specs/glm-fast-profiles.md)", () => 
       "--tools",
       WORKER_TOOLS,
     ]);
+    // A profile tunes turns and models, never the Bash allowlist.
+    expect(config.worker.allowedBash).toEqual(defaultConfig().worker.allowedBash);
   });
 
   it("glm-review uses the profile's reviewMaxTurns", () => {

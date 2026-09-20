@@ -1,3 +1,17 @@
+/*
+ * This module deliberately does NOT import platform.ts: platform.ts imports
+ * Errors, so the dependency would be circular. The couple of platform checks
+ * below read process.platform directly (specs/cross-platform.md).
+ */
+const onWindows = (): boolean => process.platform === "win32";
+
+/** Config dir as the user's own platform spells it. */
+function configPathHint(): string {
+  return onWindows()
+    ? "%USERPROFILE%\\.glm-coding-router\\config.json"
+    : "~/.glm-coding-router/config.json";
+}
+
 /** Standard exit codes (spec §35). */
 export const ExitCode = {
   Success: 0,
@@ -45,7 +59,20 @@ export const Errors = {
     new GlmRouterError({
       name: "ZAI_KEY_MISSING",
       message: "ZAI_API_KEY was not found.",
-      hint: ["Run:", "", "  glm-router key set"],
+      // On platforms without a persistent store `key set` can only print
+      // guidance, so the export line is shown here too — otherwise this hint
+      // points at a command that cannot finish the job.
+      hint: onWindows()
+        ? ["Run:", "", "  glm-router key set"]
+        : [
+            "Run:",
+            "",
+            "  glm-router key set",
+            "",
+            "or set it in this shell and your shell profile:",
+            "",
+            '  export ZAI_API_KEY="<your-key>"',
+          ],
       exitCode: ExitCode.ZaiKeyMissing,
     }),
 
@@ -53,11 +80,7 @@ export const Errors = {
     new GlmRouterError({
       name: "CONFIG_INVALID",
       message: `Configuration is invalid: ${detail}`,
-      hint: [
-        "Fix or remove the config file:",
-        "",
-        "  %USERPROFILE%\\.glm-coding-router\\config.json",
-      ],
+      hint: ["Fix or remove the config file:", "", `  ${configPathHint()}`],
       exitCode: ExitCode.ConfigInvalid,
     }),
 
@@ -70,11 +93,13 @@ export const Errors = {
       hint: [
         "Expected:",
         "",
-        "  claude.exe",
+        onWindows() ? "  claude.exe" : "  claude",
         "",
         "Install Claude Code or set an override:",
         "",
-        "  glm-router config set claudePath C:\\path\\to\\claude.exe",
+        onWindows()
+          ? "  glm-router config set claudePath C:\\path\\to\\claude.exe"
+          : "  glm-router config set claudePath /path/to/claude",
       ],
       exitCode: ExitCode.ClaudeNotFound,
     }),
@@ -112,8 +137,8 @@ export const Errors = {
   unsupportedPlatform: (platform: string): GlmRouterError =>
     new GlmRouterError({
       name: "UNSUPPORTED_PLATFORM",
-      message: `This command requires Windows (detected: ${platform}).`,
-      hint: ["Linux and macOS support is planned for v0.2."],
+      message: `This platform is not supported (detected: ${platform}).`,
+      hint: ["Supported: Windows, Linux. macOS is experimental."],
       exitCode: ExitCode.UnsupportedPlatform,
     }),
 

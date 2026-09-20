@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import path from "node:path";
 import { statusCommand } from "../../src/commands/status.js";
 import { makeTempDir, removeTempDir, writeFileSyncAll } from "../helpers/tmp.js";
+import { exeName } from "../helpers/platform.js";
 
 let dirs: string[] = [];
 
@@ -59,8 +60,8 @@ describe("statusCommand (spec §41: quick, fully offline)", () => {
   it("reports json as installed/configured once claude, codex, and the key are present", () => {
     const home = temp();
     const dir = temp();
-    writeFileSyncAll(path.join(dir, "claude.exe"), "");
-    writeFileSyncAll(path.join(dir, "codex.exe"), "");
+    writeFileSyncAll(path.join(dir, exeName("claude")), "");
+    writeFileSyncAll(path.join(dir, exeName("codex")), "");
     const out = captureStdout();
 
     const code = statusCommand(

@@ -2,7 +2,8 @@ import os from "node:os";
 import { execFileSync } from "node:child_process";
 import { defaultConfig, loadConfig, type RouterConfig } from "../core/config.js";
 import { locateClaude, locateCodex, searchPathFor } from "../core/claude.js";
-import { isWindows, windowsVersionName } from "../core/platform.js";
+import { platformName, platformSupport } from "../core/platform.js";
+import { describeKeyStore, detectUserEnvStore } from "../core/user-env.js";
 import { resolveZaiApiKey, type ZaiKeySource } from "../core/zai-key.js";
 import { configPath } from "../core/paths.js";
 import fs from "node:fs";
@@ -55,20 +56,26 @@ export function runDoctorChecks(
     home?: string;
     env?: NodeJS.ProcessEnv;
     readUserEnv?: (name: string) => string | undefined;
+    store?: ReturnType<typeof detectUserEnvStore>;
   } = {},
 ): DoctorReport {
   const results: CheckResult[] = [];
   const home = options.home ?? os.homedir();
   const env = options.env ?? process.env;
 
-  // --- System ---
+  // --- System (specs/cross-platform.md) ---
+  const support = platformSupport();
   results.push(
     check(
       "System",
-      isWindows() ? windowsVersionName() : `Platform ${process.platform}`,
-      isWindows() ? "ok" : "fail",
+      platformName(),
+      support === "supported" ? "ok" : support === "experimental" ? "warn" : "fail",
       undefined,
-      isWindows() ? undefined : "v0.1 targets Windows only.",
+      support === "experimental"
+        ? "macOS support is experimental — the suite has not been run on a Mac."
+        : support === "unsupported"
+          ? "Supported: Windows, Linux. macOS is experimental."
+          : undefined,
     ),
   );
   const nodeMajor = nodeVersionMajor();
@@ -126,17 +133,35 @@ export function runDoctorChecks(
   );
 
   // --- Z.ai key ---
+  const store = options.store ?? detectUserEnvStore();
   const resolved = resolveZaiApiKey({ env, readUserEnv: options.readUserEnv });
+  const sourceLabel =
+    resolved?.source === "process-env" ? "process environment" : describeKeyStore(store);
   results.push(
     check(
       "Z.ai",
       "ZAI_API_KEY",
       resolved ? "ok" : "fail",
-      resolved ? `configured (${resolved.source})` : "not found",
-      resolved ? undefined : "Run: glm-router key set",
+      resolved ? `configured (${sourceLabel})` : "not found",
+      resolved
+        ? undefined
+        : store === "none"
+          ? 'Set it: export ZAI_API_KEY="<your-key>" (see: glm-router key set)'
+          : "Run: glm-router key set",
     ),
   );
   results.push(check("Z.ai", "Anthropic endpoint", "ok", config.provider.anthropicBaseUrl));
+  // specs/worker-bash-permissions.md — what the worker is allowed to execute.
+  results.push(
+    check(
+      "Z.ai",
+      "Worker shell access",
+      "ok",
+      config.worker.allowedBash.length > 0
+        ? `${config.worker.allowedBash.length} allowed Bash patterns`
+        : "disabled (Bash not offered to the worker)",
+    ),
+  );
 
   // --- Commands (PATH shims; a dev checkout warns instead of failing) ---
   for (const command of ["glm-chat", "glm-worker", "glm-review"]) {
@@ -199,7 +224,7 @@ export function runDoctorChecks(
         "Process environment",
         "warn",
         "Current process does not contain ZAI_API_KEY",
-        "This is safe. GLM workers reload the key automatically from the Windows User Environment.",
+        `This is safe. GLM workers reload the key automatically from ${describeKeyStore(store)}.`,
       ),
     );
   }

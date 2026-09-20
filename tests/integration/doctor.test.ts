@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import path from "node:path";
 import { doctorHasFailures, runDoctorChecks } from "../../src/commands/doctor.js";
 import { makeTempDir, removeTempDir, writeFileSyncAll } from "../helpers/tmp.js";
+import { exeName } from "../helpers/platform.js";
 
 let dirs: string[] = [];
 
@@ -46,12 +47,12 @@ describe("runDoctorChecks (spec §9)", () => {
   it("reports Claude Code as ok once it's found on an isolated PATH", () => {
     const home = temp();
     const dir = temp();
-    writeFileSyncAll(path.join(dir, "claude.exe"), "");
+    writeFileSyncAll(path.join(dir, exeName("claude")), "");
     const report = runDoctorChecks({ home, env: isolatedEnv([dir]) });
 
     const claude = report.results.find((r) => r.section === "Agents" && r.name === "Claude Code");
     expect(claude?.status).toBe("ok");
-    expect(claude?.detail).toBe(path.join(dir, "claude.exe"));
+    expect(claude?.detail).toBe(path.join(dir, exeName("claude")));
   });
 
   it("reports ZAI_API_KEY as fail when neither process env nor Windows User Env has it", () => {

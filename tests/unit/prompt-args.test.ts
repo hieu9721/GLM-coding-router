@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resolvePrompt } from "../../src/core/prompt.js";
 import { Errors, GlmRouterError } from "../../src/core/errors.js";
 import { buildReviewArgs, REVIEW_TOOLS } from "../../src/bin/glm-review.js";
-import { buildWorkerArgs, WORKER_TOOLS } from "../../src/bin/glm-worker.js";
+import { buildWorkerArgs, extractNoBashFlag, WORKER_TOOLS } from "../../src/bin/glm-worker.js";
 import { defaultConfig } from "../../src/core/config.js";
 
 describe("resolvePrompt (spec §15, §40: stdin → args → error)", () => {
@@ -43,7 +43,7 @@ describe("claude argument construction (spec §16, §17)", () => {
   it("glm-worker uses -p, max-turns, acceptEdits, and the limited tool surface", () => {
     const config = defaultConfig();
     const args = buildWorkerArgs("Do work", config);
-    expect(args).toEqual([
+    expect(args.slice(0, 8)).toEqual([
       "-p",
       "Do work",
       "--max-turns",
@@ -54,7 +54,40 @@ describe("claude argument construction (spec §16, §17)", () => {
       "Read,Glob,Grep,Edit,Write,Bash",
     ]);
     expect(args.join(" ")).not.toContain("--dangerously-skip-permissions");
+    expect(args.join(" ")).not.toContain("bypassPermissions");
     expect(WORKER_TOOLS).toContain("Edit");
+  });
+
+  // specs/worker-bash-permissions.md — without --allowedTools every Bash call
+  // comes back "This command requires approval" in headless -p mode.
+  it("glm-worker pre-approves the configured Bash patterns", () => {
+    const args = buildWorkerArgs("Do work", defaultConfig());
+    const at = args.indexOf("--allowedTools");
+    expect(at).toBeGreaterThan(-1);
+    const patterns = args.slice(at + 1);
+    expect(patterns).toContain("Bash(npm test)");
+    expect(patterns).toContain("Bash(python3 *)");
+    expect(patterns.every((p) => p.startsWith("Bash("))).toBe(true);
+    // Validation commands only: no git writes, no rm, no network.
+    const joined = patterns.join(" ");
+    for (const forbidden of ["git commit", "git push", "rm ", "curl", "wget", "sudo"]) {
+      expect(joined).not.toContain(forbidden);
+    }
+  });
+
+  it("glm-worker drops Bash entirely when the allowlist is empty", () => {
+    const base = defaultConfig();
+    const args = buildWorkerArgs("Do work", {
+      ...base,
+      worker: { ...base.worker, allowedBash: [] },
+    });
+    expect(args).not.toContain("--allowedTools");
+    expect(args[args.indexOf("--tools") + 1]).toBe("Read,Glob,Grep,Edit,Write");
+  });
+
+  it("--no-bash empties the allowlist for one invocation", () => {
+    expect(extractNoBashFlag(["task", "--no-bash"])).toEqual({ rest: ["task"], noBash: true });
+    expect(extractNoBashFlag(["task"])).toEqual({ rest: ["task"], noBash: false });
   });
 
   it("glm-review is read-only: Read,Glob,Grep only", () => {

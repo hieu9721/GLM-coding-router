@@ -60,7 +60,12 @@ export function applyProfile(config: RouterConfig, name?: string): RouterConfig 
       main: profile.main ?? config.models.main,
       fast: profile.fast ?? config.models.fast,
     },
-    worker: { maxTurns: profile.workerMaxTurns ?? config.worker.maxTurns },
+    worker: {
+      maxTurns: profile.workerMaxTurns ?? config.worker.maxTurns,
+      // Profiles tune models and turn budgets, never the Bash allowlist —
+      // that is a security setting, not a performance knob.
+      allowedBash: config.worker.allowedBash,
+    },
     review: { maxTurns: profile.reviewMaxTurns ?? config.review.maxTurns },
   };
 }

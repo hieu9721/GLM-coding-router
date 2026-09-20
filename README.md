@@ -1,6 +1,6 @@
 # GLM Coding Router
 
-GLM Coding Plan workers for Claude Code and Codex, on Windows.
+GLM Coding Plan workers for Claude Code and Codex — on Windows, Linux, and (experimentally) macOS.
 
 Claude Code and Codex stay your orchestrators — they keep responsibility for requirements,
 architecture, review, and integration. `glm-coding-router` delegates well-scoped
@@ -43,7 +43,8 @@ Claude / Codex → shell → glm-worker → claude.exe harness → Z.ai endpoint
 
 ## Requirements
 
-- Windows 10/11 (v0.1; Linux/macOS planned for v0.2)
+- Windows 10/11 or Linux (both verified); macOS is experimental — the suite has not been
+  run on a Mac
 - Node.js >= 20
 - Claude Code (`claude.exe`) — the GLM commands run on the Claude Code harness
 - Codex (optional — Claude-only setups are fully supported)
@@ -292,7 +293,7 @@ except JSON-RPC frames.
 glm-router init              guided setup
 glm-router doctor [--network]  full runtime diagnosis
 glm-router status            quick offline overview
-glm-router key set           store ZAI_API_KEY (Windows User Environment)
+glm-router key set           store ZAI_API_KEY in this platform's per-user store
 glm-router key check         key configured? from which source?
 glm-router config show
 glm-router config set models.main glm-5.3
@@ -343,14 +344,15 @@ after Orca starts is invisible to those terminals. Every GLM command therefore r
 the key in this order:
 
 1. `process.env.ZAI_API_KEY`
-2. Windows User Environment (via PowerShell)
+2. This platform's per-user store — Windows User Environment (PowerShell), macOS login
+   keychain (`security`), or libsecret (`secret-tool`, when installed)
 3. fail with an actionable error
 
 The key is never cached to disk.
 
 ## Security model
 
-- The key lives only in the Windows User Environment; it is never written to
+- The key lives only in that per-user store; it is never written to
   `config.json`, the repo, logs, or stack traces. Debug output redacts
   `ZAI_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, and Authorization headers.
 - Z.ai routing environment variables (`ANTHROPIC_AUTH_TOKEN`,
@@ -368,7 +370,9 @@ The key is never cached to disk.
 | --- | --- |
 | `ERROR [ZAI_KEY_MISSING]` | `glm-router key set`, then open a **new** terminal |
 | `ERROR [CLAUDE_NOT_FOUND]` | Install Claude Code, or `glm-router config set claudePath C:\path\to\claude.exe` |
-| Key works in a new terminal but not inside Orca | Expected — workers re-read the Windows User Environment automatically; run `glm-router doctor` to confirm |
+| Key works in a new terminal but not inside Orca | Expected — workers re-read the per-user store automatically; run `glm-router doctor` to confirm |
+| `glm-router key set` prints an `export` line instead of saving | This platform has no secret store (e.g. Linux without `secret-tool`). Add the line to your shell profile; `glm-router key check` verifies it |
+| The worker creates files but never runs the tests | Its Bash allowlist is empty. `glm-router config show` → `worker.allowedBash`; the default list covers common test commands |
 | `glm-*` not on PATH after install | Reopen the terminal; check `npm config get prefix` is on PATH |
 | `ERROR [MANAGED_BLOCK_CORRUPT]` | Fix the marker pair in the named file manually, then re-run |
 

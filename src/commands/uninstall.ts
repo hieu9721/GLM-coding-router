@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import { configDir } from "../core/paths.js";
 import { ExitCode } from "../core/errors.js";
+import { describeKeyStore, detectUserEnvStore } from "../core/user-env.js";
 import { CodexSkillInstaller, glmDelegationSkill } from "../integrations/skill.js";
 import { keyRemoveCommand, type PromptFn } from "./key.js";
 import { removeClaudeIntegration, removeCodexIntegration } from "../integrations/index.js";
@@ -114,7 +115,7 @@ export async function uninstallCommand(
 
   if (choices.removeKey) {
     await keyRemoveCommand({ deleteEnv: deps.deleteEnv });
-    process.stdout.write("✓ ZAI_API_KEY removed from Windows User Environment\n");
+    process.stdout.write(`✓ ZAI_API_KEY removed from ${describeKeyStore(detectUserEnvStore())}\n`);
   } else {
     process.stdout.write("✓ ZAI_API_KEY kept\n");
   }

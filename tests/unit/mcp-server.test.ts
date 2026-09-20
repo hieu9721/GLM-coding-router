@@ -103,9 +103,13 @@ describe("callMcpTool handlers (specs/v1-architecture.md)", () => {
     const result = await callMcpTool("glm_worker", { prompt: "task" }, deps);
     expect(result.isError).toBe(false);
     expect(result.text).toBe("WORKER_OUTPUT");
-    expect(calls[0].args).toEqual([
+    expect(calls[0].args.slice(0, 8)).toEqual([
       "-p", "task", "--max-turns", "20", "--permission-mode", "acceptEdits", "--tools", WORKER_TOOLS,
     ]);
+    // specs/worker-bash-permissions.md: the MCP tool builds its args with
+    // buildWorkerArgs, so the Bash fix must reach it too.
+    expect(calls[0].args).toContain("--allowedTools");
+    expect(calls[0].args).toContain("Bash(npm test)");
     expect(calls[0].env.ANTHROPIC_AUTH_TOKEN).toBe("test-key");
     expect(calls[0].env.ANTHROPIC_API_KEY).toBe("");
   });

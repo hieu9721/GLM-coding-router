@@ -124,7 +124,7 @@ describe("delegateCommand happy path (specs/delegate-worktrees.md)", () => {
 
     expect(calls.length).toBe(1);
     expect(calls[0].cwd).toBe(wt);
-    expect(calls[0].args).toEqual([
+    expect(calls[0].args.slice(0, 8)).toEqual([
       "-p",
       "do stuff",
       "--max-turns",

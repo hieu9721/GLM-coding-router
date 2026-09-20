@@ -45,6 +45,9 @@ describe("initCommand (spec §7)", () => {
         env: isolatedEnv([emptyPath]),
         readUserEnv: () => undefined,
         setEnv,
+        // Exercise a machine that has a persistent store; the no-store path
+        // is covered in key-command.test.ts (specs/cross-platform.md).
+        store: "windows-user-env",
         prompt: async () => ({ key: "  test-key  " }),
       },
     );
@@ -70,6 +73,9 @@ describe("initCommand (spec §7)", () => {
         env: isolatedEnv([emptyPath]),
         readUserEnv: () => undefined,
         setEnv,
+        // Exercise a machine that has a persistent store; the no-store path
+        // is covered in key-command.test.ts (specs/cross-platform.md).
+        store: "windows-user-env",
         prompt: async () => ({ key: undefined }),
       },
     );

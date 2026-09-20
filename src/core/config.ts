@@ -8,6 +8,39 @@ export const DEFAULT_ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic";
 export const DEFAULT_MAIN_MODEL = "glm-5.3";
 export const DEFAULT_FAST_MODEL = "glm-5.3-flash";
 
+/**
+ * Bash commands the worker may run without an approval prompt
+ * (specs/worker-bash-permissions.md). Headless `-p` has no prompt to answer,
+ * so without this every Bash call is denied and the worker cannot validate its
+ * own work. Validation commands only: no git writes, no rm, no network, no
+ * package installs.
+ */
+export const DEFAULT_ALLOWED_BASH: readonly string[] = [
+  "npm test",
+  "npm run *",
+  "npx vitest *",
+  "go test *",
+  "pytest*",
+  "python3 *",
+  "cargo test*",
+  "git status",
+  "git diff*",
+];
+
+/** Shell metacharacters defeat pattern matching, so they may not appear. */
+const BASH_PATTERN_FORBIDDEN = /[&;|`$><\n]/;
+
+const AllowedBashSchema = z
+  .array(
+    z
+      .string()
+      .min(1)
+      .refine((value) => !BASH_PATTERN_FORBIDDEN.test(value), {
+        message: "must not contain shell metacharacters (& ; | ` $ > <)",
+      }),
+  )
+  .default([...DEFAULT_ALLOWED_BASH]);
+
 /** Named model/maxTurns overlay selected via --profile (specs/glm-fast-profiles.md). */
 export const ProfileSchema = z.object({
   main: z.string().min(1).optional(),
@@ -33,7 +66,8 @@ export const ConfigSchema = z.object({
 
   worker: z.object({
     maxTurns: z.number().int().positive(),
-  }).default({ maxTurns: 20 }),
+    allowedBash: AllowedBashSchema,
+  }).default({ maxTurns: 20, allowedBash: [...DEFAULT_ALLOWED_BASH] }),
 
   review: z.object({
     maxTurns: z.number().int().positive(),
@@ -66,7 +100,7 @@ export function defaultConfig(): RouterConfig {
       main: DEFAULT_MAIN_MODEL,
       fast: DEFAULT_FAST_MODEL,
     },
-    worker: { maxTurns: 20 },
+    worker: { maxTurns: 20, allowedBash: [...DEFAULT_ALLOWED_BASH] },
     review: { maxTurns: 15 },
     integrations: {
       claude: true,

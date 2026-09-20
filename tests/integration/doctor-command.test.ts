@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import path from "node:path";
 import { doctorCommand, probeEndpoint } from "../../src/commands/doctor-command.js";
 import { makeTempDir, removeTempDir, writeFileSyncAll } from "../helpers/tmp.js";
+import { exeName } from "../helpers/platform.js";
 
 let dirs: string[] = [];
 
@@ -69,7 +70,7 @@ describe("doctorCommand (spec §9, §42)", () => {
   it("renders JSON with status HEALTHY and exit 0 when every check passes", async () => {
     const home = temp();
     const dir = temp();
-    writeFileSyncAll(path.join(dir, "claude.exe"), "");
+    writeFileSyncAll(path.join(dir, exeName("claude")), "");
     const out = captureStdout();
 
     const code = await doctorCommand(
@@ -103,7 +104,7 @@ describe("doctorCommand (spec §9, §42)", () => {
   it("includes the network probe result in JSON output when --network is passed", async () => {
     const home = temp();
     const dir = temp();
-    writeFileSyncAll(path.join(dir, "claude.exe"), "");
+    writeFileSyncAll(path.join(dir, exeName("claude")), "");
     const out = captureStdout();
 
     const code = await doctorCommand(
@@ -138,7 +139,7 @@ describe("doctorCommand (spec §9, §42)", () => {
   it("renders human-readable text grouped by section, with symbols and a trailing status line", async () => {
     const home = temp();
     const dir = temp();
-    writeFileSyncAll(path.join(dir, "claude.exe"), "");
+    writeFileSyncAll(path.join(dir, exeName("claude")), "");
     const out = captureStdout();
 
     const code = await doctorCommand(
@@ -151,14 +152,14 @@ describe("doctorCommand (spec §9, §42)", () => {
     expect(text).toContain("GLM Coding Router Doctor");
     expect(text).toContain("Agents");
     expect(text).toContain("✓ Claude Code");
-    expect(text).toContain(path.join(dir, "claude.exe"));
+    expect(text).toContain(path.join(dir, exeName("claude")));
     expect(text).toMatch(/Status: HEALTHY\n$/);
   });
 
   it("renders the Network section in text output when --network is passed", async () => {
     const home = temp();
     const dir = temp();
-    writeFileSyncAll(path.join(dir, "claude.exe"), "");
+    writeFileSyncAll(path.join(dir, exeName("claude")), "");
     const out = captureStdout();
 
     await doctorCommand(

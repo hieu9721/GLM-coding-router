@@ -3,6 +3,7 @@ import path from "node:path";
 import { codexRequired, locateClaude, locateCodex, searchPathFor } from "../../src/core/claude.js";
 import { GlmRouterError } from "../../src/core/errors.js";
 import { makeTempDir, removeTempDir, writeFileSyncAll } from "../helpers/tmp.js";
+import { exeName, onWindows } from "../helpers/platform.js";
 
 let dirs: string[] = [];
 
@@ -28,19 +29,30 @@ function isolatedEnv(dirsToInclude: string[]): NodeJS.ProcessEnv {
 }
 
 describe("searchPathFor (spec §33)", () => {
-  it("prefers a native .exe over a .cmd shim in the same directory", () => {
+  // The .exe/.cmd preference is Windows-only behavior by construction
+  // (specs/cross-platform.md): off Windows the extension list is [""].
+  it.runIf(onWindows)("prefers a native .exe over a .cmd shim in the same directory", () => {
     const dir = temp();
     writeFileSyncAll(path.join(dir, "claude.cmd"), "@echo off");
-    writeFileSyncAll(path.join(dir, "claude.exe"), "");
+    writeFileSyncAll(path.join(dir, exeName("claude")), "");
     const found = searchPathFor("claude", { PATH: dir });
-    expect(found).toBe(path.join(dir, "claude.exe"));
+    expect(found).toBe(path.join(dir, exeName("claude")));
   });
 
-  it("falls back to the .cmd shim when no .exe exists (last resort)", () => {
+  it.runIf(onWindows)("falls back to the .cmd shim when no .exe exists (last resort)", () => {
     const dir = temp();
     writeFileSyncAll(path.join(dir, "claude.cmd"), "@echo off");
     const found = searchPathFor("claude", { PATH: dir });
     expect(found).toBe(path.join(dir, "claude.cmd"));
+  });
+
+  it.skipIf(onWindows)("finds the extensionless binary and ignores Windows spellings", () => {
+    const dir = temp();
+    writeFileSyncAll(path.join(dir, "claude.cmd"), "@echo off");
+    writeFileSyncAll(path.join(dir, "claude.exe"), "");
+    expect(searchPathFor("claude", { PATH: dir })).toBeUndefined();
+    writeFileSyncAll(path.join(dir, "claude"), "#!/bin/sh");
+    expect(searchPathFor("claude", { PATH: dir })).toBe(path.join(dir, "claude"));
   });
 
   it("returns undefined when nothing matches", () => {
@@ -52,9 +64,9 @@ describe("searchPathFor (spec §33)", () => {
 describe("locateClaude (spec §33: where.exe -> PATH search -> config override -> error)", () => {
   it("finds claude via a PATH search when where.exe has nothing to find", () => {
     const dir = temp();
-    writeFileSyncAll(path.join(dir, "claude.exe"), "");
+    writeFileSyncAll(path.join(dir, exeName("claude")), "");
     const found = locateClaude(undefined, isolatedEnv([dir]));
-    expect(found).toBe(path.join(dir, "claude.exe"));
+    expect(found).toBe(path.join(dir, exeName("claude")));
   });
 
   it("falls back to the config override when PATH search fails", () => {
@@ -90,9 +102,9 @@ describe("locateClaude (spec §33: where.exe -> PATH search -> config override -
 describe("locateCodex (spec §34: absence is not fatal)", () => {
   it("finds codex via a PATH search", () => {
     const dir = temp();
-    writeFileSyncAll(path.join(dir, "codex.exe"), "");
+    writeFileSyncAll(path.join(dir, exeName("codex")), "");
     const found = locateCodex(undefined, isolatedEnv([dir]));
-    expect(found).toBe(path.join(dir, "codex.exe"));
+    expect(found).toBe(path.join(dir, exeName("codex")));
   });
 
   it("returns undefined (not throwing) when nothing is found and there is no override", () => {
@@ -125,7 +137,7 @@ describe("codexRequired (spec §34)", () => {
 
   it("returns the path when codex is present", () => {
     const dir = temp();
-    writeFileSyncAll(path.join(dir, "codex.exe"), "");
-    expect(codexRequired(undefined, isolatedEnv([dir]))).toBe(path.join(dir, "codex.exe"));
+    writeFileSyncAll(path.join(dir, exeName("codex")), "");
+    expect(codexRequired(undefined, isolatedEnv([dir]))).toBe(path.join(dir, exeName("codex")));
   });
 });

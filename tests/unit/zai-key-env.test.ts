@@ -4,7 +4,7 @@ import { createGlmEnv } from "../../src/core/env.js";
 import { defaultConfig } from "../../src/core/config.js";
 import { redact } from "../../src/core/logging.js";
 
-describe("resolveZaiApiKey (spec §10: process env → Windows User Env → fail)", () => {
+describe("resolveZaiApiKey (spec §10: process env → per-user store → fail)", () => {
   it("prefers the process environment", () => {
     const resolved = resolveZaiApiKey({
       env: { ZAI_API_KEY: "key-from-process" },
@@ -13,12 +13,12 @@ describe("resolveZaiApiKey (spec §10: process env → Windows User Env → fail
     expect(resolved).toEqual({ key: "key-from-process", source: "process-env" });
   });
 
-  it("falls back to the Windows User Environment (Orca stale env)", () => {
+  it("falls back to the per-user store (Orca stale env)", () => {
     const resolved = resolveZaiApiKey({
       env: {},
       readUserEnv: () => "key-from-user-env",
     });
-    expect(resolved).toEqual({ key: "key-from-user-env", source: "windows-user-env" });
+    expect(resolved).toEqual({ key: "key-from-user-env", source: "user-store" });
   });
 
   it("fails when neither source has the key", () => {

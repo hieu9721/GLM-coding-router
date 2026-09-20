@@ -8,7 +8,8 @@ between the two files. See "Scaling beyond v0.1" at the bottom before adding new
 
 npm CLI (`glm-coding-router`, CLI name `glm-router`) that lets Claude Code and Codex act as orchestrators while GLM Coding Plan (via Z.ai's Anthropic-compatible endpoint `https://api.z.ai/api/anthropic`) does implementation work. Provides five binaries: `glm-router`, `glm-chat`, `glm-fast`, `glm-worker`, `glm-review`.
 
-- v0.1 targets **Windows 10/11 only**, Node >= 20, TypeScript, ESM, distributed via npm.
+- Runs on **Windows 10/11** and **Linux** (both verified); **macOS is experimental** — designed
+  but never executed on a Mac (`specs/cross-platform.md`). Node >= 20, TypeScript, ESM, npm.
 - The authoritative source is `docs/GLM Coding Router — Technical Specification v0.1.md` — read the relevant sections before changing behavior. The spec is bilingual (Vietnamese/English); section numbers referenced here come from it.
 
 ## Session memory
@@ -30,14 +31,16 @@ Claude Code / Codex → shell command → glm-chat / glm-worker / glm-review →
 - `src/bin/{glm-chat,glm-fast,glm-worker,glm-review}.ts` — the four thin task binaries that
   resolve the Z.ai key, locate `claude.exe`, build the injected env, and spawn the child process.
   `glm-chat` is interactive; `glm-fast` is interactive pinned to the fast model; `glm-worker`
-  runs with `--tools Read,Glob,Grep,Edit,Write,Bash`; `glm-review` is read-only with
+  runs with `--tools Read,Glob,Grep,Edit,Write,Bash` plus an `--allowedTools` Bash allowlist
+  (`specs/worker-bash-permissions.md`); `glm-review` is read-only with
   `--tools Read,Glob,Grep`. All four accept `--profile <name>` (see `specs/glm-fast-profiles.md`).
 - `src/core/` — shared runtime: `config.ts` (zod-validated config), `paths.ts`, `zai-key.ts` (key
   resolution), `claude.ts` (`locateClaude`/`locateCodex` discovery), `env.ts` (`createGlmEnv`,
   the child-only environment), `process.ts` (`spawnAgent`), `prompt.ts` (stdin/args resolution),
   `profile.ts` (`extractProfileFlag`/`applyProfile`), `git.ts` (`runGit`/`gitTopLevel` for
   delegate), `worktree.ts` (delegate worktree lifecycle, see `specs/delegate-worktrees.md`),
-  `platform.ts`, `errors.ts`
+  `platform.ts` (`platformSupport`/`platformName`), `user-env.ts` (per-user secret store
+  dispatcher: Windows User Environment / macOS keychain / libsecret / none), `errors.ts`
   (`GlmRouterError`, `ExitCode`, `Errors` factory), `logging.ts` (`redact`), `main-guard.ts`
   (`isMainModule`), `version.ts`.
 - `src/integrations/` — `claude.ts` and `codex.ts` wire the managed-block engine into each tool's
@@ -78,14 +81,14 @@ Integration tests spawn `tests/fixtures/fake-agent.mjs` through `node.exe` to ve
 ## Hard rules
 
 **Security (spec §38, §11, §37)**
-- Never log, persist, or print `ZAI_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / Authorization headers. Redact in debug output via `logging.ts#redact`. Key lives only in Windows User Environment, never in config.json or the repo.
+- Never log, persist, or print `ZAI_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / Authorization headers. Redact in debug output via `logging.ts#redact`. Key lives only in the platform's per-user store (or the user's own shell profile), never in config.json or the repo.
 - Z.ai env vars (`ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, model overrides) are injected **only into the spawned claude.exe child process** (`createGlmEnv` in `src/core/env.ts`) — never the parent shell, never global. `ANTHROPIC_API_KEY` is set to empty in child env.
 - Never modify existing Claude Code or Codex authentication.
 - Use `spawn(path, argsArray)` with env — never string `exec`, no `shell: true`, no unescaped PowerShell built from user data. Windows argument escaping matters.
 - No telemetry, no automatic git commits.
 
 **Key resolution (spec §10)**
-- `resolveZaiApiKey()` in `src/core/zai-key.ts`: `process.env.ZAI_API_KEY` → Windows User Environment (via `powershell.exe -NoProfile -NonInteractive [Environment]::GetEnvironmentVariable(...,'User')`) → fail. Do not cache the key to disk. This exists because Orca terminals snapshot a stale environment.
+- `resolveZaiApiKey()` in `src/core/zai-key.ts`: `process.env.ZAI_API_KEY` → the platform's per-user store via `src/core/user-env.ts` (Windows: `powershell.exe … GetEnvironmentVariable(…,'User')`; macOS: `security`; Linux: `secret-tool` when installed; otherwise none) → fail. Read fresh on every invocation, never cached to disk. This exists because Orca terminals snapshot a stale environment.
 
 **Managed blocks (spec §20–22, §46, §48)**
 - `CLAUDE.md` / `AGENTS.md` edits go only inside `<!-- glm-coding-router:start/end -->` markers: append if absent, replace if present, never duplicate; preserve all content outside the block. On corrupt/malformed marker pairs, do not modify the file — return an actionable error (`Errors.managedBlockCorrupt`).
@@ -94,9 +97,11 @@ Integration tests spawn `tests/fixtures/fake-agent.mjs` through `node.exe` to ve
 - The stub/pointer wording in `CLAUDE.md` (see "Scaling beyond v0.1") lives **outside** the managed block and is separate from it — the managed-block engine must keep writing its own block into both files unchanged.
 
 **Other invariants**
-- Model names (`glm-5.3`, `glm-5.3-flash`) come from config (`%USERPROFILE%\.glm-coding-router\config.json`, zod-validated) — never hardcode in multiple places.
+- Model names (`glm-5.3`, `glm-5.3-flash`) come from config (`%USERPROFILE%\.glm-coding-router\config.json` / `~/.glm-coding-router/config.json`, zod-validated) — never hardcode in multiple places.
 - Standard exit codes (spec §35, `src/core/errors.ts`): 10 key missing, 11 config invalid, 20 claude missing, 21 codex missing, 30 project root, 31 managed write, 40 child agent, 50 platform. Error messages use `ERROR [CODE]` format (`formatGlmError`) and are actionable.
-- `glm-review` is read-only: `--tools Read,Glob,Grep` only. `glm-worker` uses `--tools`, never `--dangerously-skip-permissions`.
+- `glm-review` is read-only: `--tools Read,Glob,Grep` only. `glm-worker` uses `--tools`, never `--dangerously-skip-permissions` — and never `--permission-mode bypassPermissions`, which is the same thing renamed.
+- The worker's Bash access is an explicit allowlist (`worker.allowedBash`, `specs/worker-bash-permissions.md`): validation commands only, never git writes / `rm` / network / installs. `acceptEdits` alone denies **every** Bash call in headless mode, so the allowlist is what makes the tool usable — removing it silently disables validation.
+- The Z.ai key lives in the platform's own per-user store (`src/core/user-env.ts`): Windows User Environment, macOS keychain, or libsecret when `secret-tool` exists. Where there is none, the tool **prints guidance and never invents a file of its own** — the key is still never written anywhere this package owns.
 - Child processes inherit cwd/stdio, forward SIGINT (Ctrl+C must reach child claude), propagate exit code.
 - Prompt input priority: stdin (when not a TTY) → args → error (`src/core/prompt.ts`).
 - Claude binary discovery (`src/core/claude.ts`): `where.exe claude` → PATH search → config override → error. Don't assume `claude.cmd`; standalone installs expose `claude.exe`. Codex absence is a WARN, not fatal (Claude-only setups must work).

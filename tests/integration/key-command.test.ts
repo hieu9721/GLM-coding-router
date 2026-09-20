@@ -34,7 +34,7 @@ describe("keySetCommand (spec §11)", () => {
 
     const code = await keySetCommand(
       {},
-      { prompt: async () => ({ key: "  test-key  " }), setEnv },
+      { prompt: async () => ({ key: "  test-key  " }), setEnv, store: "windows-user-env" },
     );
 
     expect(code).toBe(0);
@@ -42,12 +42,31 @@ describe("keySetCommand (spec §11)", () => {
     expect(setEnv).toHaveBeenCalledWith(ZAI_API_KEY_ENV, "test-key");
   });
 
+  // specs/cross-platform.md: no store (the common Linux case) is guidance,
+  // not an error — it must never prompt for a secret it cannot save.
+  it("prints the shell export guidance and exits 0 when there is no store", async () => {
+    const setEnv = vi.fn();
+    const prompt = vi.fn();
+    const out = captureStdout();
+    const code = await keySetCommand(
+      {},
+      { prompt, setEnv, store: "none", env: { SHELL: "/bin/bash", HOME: "/home/tester" }, home: "/home/tester" },
+    );
+
+    expect(code).toBe(0);
+    expect(prompt).not.toHaveBeenCalled();
+    expect(setEnv).not.toHaveBeenCalled();
+    expect(out.text()).toContain('export ZAI_API_KEY="<your-key>"');
+    expect(out.text()).toContain("/home/tester/.bashrc");
+    expect(out.text()).not.toContain("requires Windows");
+  });
+
   it("exits 1 without touching setEnv when the prompt is cancelled", async () => {
     const setEnv = vi.fn();
 
     const code = await keySetCommand(
       {},
-      { prompt: async () => ({ key: undefined }), setEnv },
+      { prompt: async () => ({ key: undefined }), setEnv, store: "windows-user-env" },
     );
 
     expect(code).toBe(1);
@@ -86,8 +105,18 @@ describe("keyRemoveCommand (spec §44)", () => {
   it("deletes the Z.ai key variable via deleteEnv", async () => {
     const deleteEnv = vi.fn();
 
-    await keyRemoveCommand({ deleteEnv });
+    await keyRemoveCommand({ deleteEnv, store: "windows-user-env" });
 
     expect(deleteEnv).toHaveBeenCalledWith(ZAI_API_KEY_ENV);
+  });
+});
+
+describe("keyRemoveCommand with no store (specs/cross-platform.md)", () => {
+  it("does not call deleteEnv and explains where the key actually lives", async () => {
+    const deleteEnv = vi.fn();
+    const out = captureStdout();
+    await keyRemoveCommand({ deleteEnv, store: "none" });
+    expect(deleteEnv).not.toHaveBeenCalled();
+    expect(out.text()).toContain("shell profile");
   });
 });

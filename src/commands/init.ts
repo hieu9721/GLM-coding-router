@@ -6,7 +6,8 @@ import { configPath } from "../core/paths.js";
 import { ExitCode } from "../core/errors.js";
 import { runDoctorChecks, type CheckResult } from "./doctor.js";
 import { setWindowsUserEnv, ZAI_API_KEY_ENV } from "../core/zai-key.js";
-import { isWindows } from "../core/platform.js";
+import { detectUserEnvStore, type UserEnvStore } from "../core/user-env.js";
+import { printShellKeyGuidance } from "./key.js";
 import { CodexSkillInstaller, glmDelegationSkill } from "../integrations/skill.js";
 import type { GlobalOptions } from "./context.js";
 import type { PromptFn } from "./key.js";
@@ -77,6 +78,8 @@ export interface InitDeps {
   readonly readUserEnv?: (name: string) => string | undefined;
   readonly setEnv?: (name: string, value: string) => void;
   readonly prompt?: PromptFn;
+  /** Defaults to this machine's detected store — injected by tests. */
+  readonly store?: UserEnvStore;
 }
 
 /** glm-router init (spec §7): environment report, key setup, config, skill. Idempotent. */
@@ -119,8 +122,9 @@ export async function initCommand(options: GlobalOptions, deps: InitDeps = {}): 
   if (existingKey) {
     process.stdout.write(`✓ ${ZAI_API_KEY_ENV} already configured (${report.keySource})\n`);
   } else if (choices.configureKey) {
-    if (!isWindows()) {
-      process.stdout.write("⚠ Key storage requires Windows in v0.1 — skipped\n");
+    if ((deps.store ?? detectUserEnvStore()) === "none") {
+      // No persistent store here; tell the user the one line that works.
+      printShellKeyGuidance({ env: deps.env });
     } else {
       const keyResponse = await prompt({
         type: "password",

@@ -13,8 +13,21 @@ import { resolveZaiApiKey } from "../core/zai-key.js";
 /** Worker tool surface (spec §16). */
 export const WORKER_TOOLS = "Read,Glob,Grep,Edit,Write,Bash";
 
+/** Same surface minus Bash, used when no Bash command is allowed. */
+export const WORKER_TOOLS_NO_BASH = "Read,Glob,Grep,Edit,Write";
+
+/**
+ * Build the child arguments (spec §16, specs/worker-bash-permissions.md).
+ *
+ * `--permission-mode acceptEdits` auto-approves file edits but NOT shell
+ * commands, and headless `-p` has no prompt to answer — so without an explicit
+ * `--allowedTools` every Bash call comes back "This command requires
+ * approval". When the allowlist is empty we drop Bash from `--tools` entirely
+ * rather than advertising a tool the worker can never use.
+ */
 export function buildWorkerArgs(prompt: string, config: RouterConfig): string[] {
-  return [
+  const allowedBash = config.worker.allowedBash;
+  const args = [
     "-p",
     prompt,
     "--max-turns",
@@ -22,8 +35,29 @@ export function buildWorkerArgs(prompt: string, config: RouterConfig): string[] 
     "--permission-mode",
     "acceptEdits",
     "--tools",
-    WORKER_TOOLS,
+    allowedBash.length > 0 ? WORKER_TOOLS : WORKER_TOOLS_NO_BASH,
   ];
+  if (allowedBash.length > 0) {
+    args.push("--allowedTools", ...allowedBash.map((pattern) => `Bash(${pattern})`));
+  }
+  return args;
+}
+
+/** Strip `--no-bash`, which empties the allowlist for one invocation. */
+export function extractNoBashFlag(argv: readonly string[]): {
+  rest: string[];
+  noBash: boolean;
+} {
+  const rest: string[] = [];
+  let noBash = false;
+  for (const arg of argv) {
+    if (arg === "--no-bash") {
+      noBash = true;
+      continue;
+    }
+    rest.push(arg);
+  }
+  return { rest, noBash };
 }
 
 /**
@@ -32,9 +66,13 @@ export function buildWorkerArgs(prompt: string, config: RouterConfig): string[] 
  * --dangerously-skip-permissions.
  */
 export async function runWorker(argv: readonly string[]): Promise<number> {
-  const { rest, profile } = extractProfileFlag(argv);
+  const { rest: withoutProfile, profile } = extractProfileFlag(argv);
+  const { rest, noBash } = extractNoBashFlag(withoutProfile);
   const prompt = await resolvePrompt(rest);
-  const config = applyProfile(loadConfig(), profile);
+  const loaded = applyProfile(loadConfig(), profile);
+  const config: RouterConfig = noBash
+    ? { ...loaded, worker: { ...loaded.worker, allowedBash: [] } }
+    : loaded;
   const resolved = resolveZaiApiKey();
   if (!resolved) {
     throw Errors.zaiKeyMissing();
