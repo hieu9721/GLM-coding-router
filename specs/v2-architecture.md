@@ -181,7 +181,14 @@ Rules: **never throw** — an unrecognized `type`, a missing field, or invalid J
 zero events plus one debug log. `summary` derivation per tool: Read/Edit/Write → path made
 repo-relative; Bash → command, first line, truncated; Grep/Glob → pattern; anything else →
 tool name only. Every summary passes through `redact()` before it leaves the adapter.
-Validation detection: Bash command matches `/(npm|pnpm|yarn) (run )?(test|lint|typecheck)|vitest|jest|go test|pytest|cargo test|tsc\b/`.
+Validation detection: Bash command matches `/(npm|pnpm|yarn) (run )?(test|lint|typecheck)|vitest|jest|go test|pytest|cargo test|tsc\b|python3? (-m (pytest|unittest)\b|\S*test\S*\.py)/`.
+
+> The `python3` arm was added on 2026-09-20 when the adapter landed: A0's captured runs
+> validate with `python3 test_add.py`, which the original pattern missed, so **not one of
+> the three fixtures exercised the validation path** and the spec's own "a denied validation
+> is a real, reportable outcome" described something that could not happen. The allowlist in
+> `specs/worker-bash-permissions.md` already treats `python3 *` and `pytest*` as validation
+> commands; this makes the detector agree with it.
 
 **Prerequisite — `specs/worker-bash-permissions.md`.** A0 proved that on the published 1.0.0
 arguments *every* Bash call is denied (`system/permission_denied`, "This command requires
