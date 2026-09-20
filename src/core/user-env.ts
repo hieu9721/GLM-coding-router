@@ -239,15 +239,17 @@ export function describeShellExport(
   const env = deps.env ?? process.env;
   const home = deps.home ?? env.HOME ?? "~";
   const exists = deps.exists ?? ((file: string) => fs.existsSync(file));
-  const shell = path.basename(env.SHELL ?? "bash");
+  const shell = path.posix.basename(env.SHELL ?? "bash");
   const candidates =
     shell === "zsh"
       ? [".zshrc", ".zprofile", ".profile"]
       : shell === "fish"
         ? [".config/fish/config.fish"]
         : [".bashrc", ".bash_profile", ".profile"];
-  const found = candidates.find((rel) => exists(path.join(home, rel)));
-  const profile = path.join(home, found ?? candidates[0]);
+  // POSIX paths by definition: this guidance only ever names a shell rc file,
+  // so it must not pick up Windows separators when the process runs on win32.
+  const found = candidates.find((rel) => exists(path.posix.join(home, rel)));
+  const profile = path.posix.join(home, found ?? candidates[0]);
   const line =
     shell === "fish" ? `set -gx ${name} <your-key>` : `export ${name}="<your-key>"`;
   return { line, profile };
