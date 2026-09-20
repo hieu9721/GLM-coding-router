@@ -153,6 +153,9 @@ describe("benchmarkCommand happy paths (specs/benchmark.md)", () => {
       "acceptEdits",
       "--tools",
       WORKER_TOOLS,
+      // A benchmark measures a fixed tool surface, so no inherited MCP servers
+      // (specs/review-mcp-isolation.md).
+      "--strict-mcp-config",
       "--output-format",
       "json",
     ]);

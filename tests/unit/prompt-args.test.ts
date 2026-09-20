@@ -90,10 +90,20 @@ describe("claude argument construction (spec §16, §17)", () => {
     expect(extractNoBashFlag(["task"])).toEqual({ rest: ["task"], noBash: false });
   });
 
-  it("glm-review is read-only: Read,Glob,Grep only", () => {
+  it("glm-review is read-only: Read,Glob,Grep only, and no inherited MCP tools", () => {
     const config = defaultConfig();
     const args = buildReviewArgs("Inspect", config);
-    expect(args).toEqual(["-p", "Inspect", "--max-turns", "15", "--tools", "Read,Glob,Grep"]);
+    // --tools restricts only the built-in set, so --strict-mcp-config is part
+    // of the read-only guarantee, not decoration (specs/review-mcp-isolation.md).
+    expect(args).toEqual([
+      "-p",
+      "Inspect",
+      "--max-turns",
+      "15",
+      "--tools",
+      "Read,Glob,Grep",
+      "--strict-mcp-config",
+    ]);
     expect(REVIEW_TOOLS).not.toContain("Edit");
     expect(REVIEW_TOOLS).not.toContain("Write");
     expect(REVIEW_TOOLS).not.toContain("Bash");

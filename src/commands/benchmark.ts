@@ -10,6 +10,7 @@ import { locateClaude } from "../core/claude.js";
 import { createGlmEnv } from "../core/env.js";
 import { Errors } from "../core/errors.js";
 import { configDir } from "../core/paths.js";
+import { STRICT_MCP_ARGS } from "../core/agent-args.js";
 import { spawnAgentCapture, type CapturedResult, type SpawnAgentOptions } from "../core/process.js";
 import { resolveZaiApiKey } from "../core/zai-key.js";
 import { BENCHMARK_TASKS, benchmarkTaskById, type BenchmarkTask } from "../templates/benchmark-tasks.js";
@@ -208,6 +209,9 @@ async function runTask(task: BenchmarkTask, run: number, ctx: RunContext): Promi
       "acceptEdits",
       "--tools",
       WORKER_TOOLS,
+      // A benchmark is only comparable if the tool surface is fixed
+      // (specs/review-mcp-isolation.md).
+      ...STRICT_MCP_ARGS,
       "--output-format",
       "json",
     ];

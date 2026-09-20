@@ -135,7 +135,14 @@ dependency inspection, and preliminary review:
 glm-review "Inspect this repository"
 ```
 
-Runs with `--tools Read,Glob,Grep` — it cannot edit files or run commands.
+Runs with `--tools Read,Glob,Grep --strict-mcp-config` — it cannot edit files or run
+commands.
+
+The second flag is part of the guarantee, not a detail: `--tools` restricts only Claude
+Code's **built-in** tools, so without it a review session would also inherit whatever MCP
+servers you have registered — including this project's own, whose `glm_worker` tool writes
+files. `glm-worker` and `glm-router benchmark` are isolated the same way. Interactive
+sessions (`glm-chat`, `glm-fast`) are not: your servers are yours.
 
 ## Profiles
 

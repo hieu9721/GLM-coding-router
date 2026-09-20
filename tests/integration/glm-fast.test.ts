@@ -103,6 +103,9 @@ describe("--profile wiring in arg builders (specs/glm-fast-profiles.md)", () => 
       "40",
       "--tools",
       REVIEW_TOOLS,
+      // specs/review-mcp-isolation.md: without this the read-only surface
+      // inherits the user's MCP servers, including a write-capable worker.
+      "--strict-mcp-config",
     ]);
   });
 });

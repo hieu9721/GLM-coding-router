@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { STRICT_MCP_ARGS } from "../core/agent-args.js";
 import { loadConfig, type RouterConfig } from "../core/config.js";
 import { locateClaude } from "../core/claude.js";
 import { createGlmEnv } from "../core/env.js";
@@ -13,8 +14,24 @@ import { resolveZaiApiKey } from "../core/zai-key.js";
 /** Read-only review surface (spec §17) — no Edit, Write, or Bash. */
 export const REVIEW_TOOLS = "Read,Glob,Grep";
 
+/**
+ * Build the child arguments (spec §17, specs/review-mcp-isolation.md).
+ *
+ * `--tools` alone does not make this read-only: it restricts the built-in set,
+ * while MCP tools from the user's config are additive — with our own server
+ * registered, a review could call `glm_worker` and write files. STRICT_MCP_ARGS
+ * is what actually holds the guarantee.
+ */
 export function buildReviewArgs(prompt: string, config: RouterConfig): string[] {
-  return ["-p", prompt, "--max-turns", String(config.review.maxTurns), "--tools", REVIEW_TOOLS];
+  return [
+    "-p",
+    prompt,
+    "--max-turns",
+    String(config.review.maxTurns),
+    "--tools",
+    REVIEW_TOOLS,
+    ...STRICT_MCP_ARGS,
+  ];
 }
 
 /**

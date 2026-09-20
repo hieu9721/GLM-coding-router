@@ -86,6 +86,7 @@ Integration tests spawn `tests/fixtures/fake-agent.mjs` through `node.exe` to ve
 - Never modify existing Claude Code or Codex authentication.
 - Use `spawn(path, argsArray)` with env — never string `exec`, no `shell: true`, no unescaped PowerShell built from user data. Windows argument escaping matters.
 - No telemetry, no automatic git commits.
+- Every headless spawn we construct passes `STRICT_MCP_ARGS` (`src/core/agent-args.ts`): `--tools` restricts only the built-in set, so without it a child inherits the user's MCP servers — which gave read-only `glm-review` a write-capable `glm_worker` (specs/review-mcp-isolation.md). Not configurable, not profile-overridable. Interactive `glm-chat`/`glm-fast` are excluded by design.
 
 **Key resolution (spec §10)**
 - `resolveZaiApiKey()` in `src/core/zai-key.ts`: `process.env.ZAI_API_KEY` → the platform's per-user store via `src/core/user-env.ts` (Windows: `powershell.exe … GetEnvironmentVariable(…,'User')`; macOS: `security`; Linux: `secret-tool` when installed; otherwise none) → fail. Read fresh on every invocation, never cached to disk. This exists because Orca terminals snapshot a stale environment.

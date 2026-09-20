@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { STRICT_MCP_ARGS } from "../core/agent-args.js";
 import { loadConfig, type RouterConfig } from "../core/config.js";
 import { locateClaude } from "../core/claude.js";
 import { createGlmEnv } from "../core/env.js";
@@ -24,6 +25,10 @@ export const WORKER_TOOLS_NO_BASH = "Read,Glob,Grep,Edit,Write";
  * `--allowedTools` every Bash call comes back "This command requires
  * approval". When the allowlist is empty we drop Bash from `--tools` entirely
  * rather than advertising a tool the worker can never use.
+ *
+ * STRICT_MCP_ARGS keeps the user's MCP servers out of the child
+ * (specs/review-mcp-isolation.md): write is expected here, undeclared
+ * recursion into `glm_delegate` and its own turn budget is not.
  */
 export function buildWorkerArgs(prompt: string, config: RouterConfig): string[] {
   const allowedBash = config.worker.allowedBash;
@@ -36,6 +41,8 @@ export function buildWorkerArgs(prompt: string, config: RouterConfig): string[] 
     "acceptEdits",
     "--tools",
     allowedBash.length > 0 ? WORKER_TOOLS : WORKER_TOOLS_NO_BASH,
+    // Before --allowedTools: its values are variadic and must stay last.
+    ...STRICT_MCP_ARGS,
   ];
   if (allowedBash.length > 0) {
     args.push("--allowedTools", ...allowedBash.map((pattern) => `Bash(${pattern})`));
