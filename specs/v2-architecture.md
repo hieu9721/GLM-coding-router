@@ -229,7 +229,11 @@ rebuilds a summary from events so `runs show` works for crashed runs.
 **`src/runs/heartbeat.ts`** — `startHeartbeat(runId, getState)` emits a `Heartbeat` event
 and refreshes `heartbeatAt` every 5 s (config-free constant). A reader treats an active run
 as **orphaned** when `heartbeatAt` is older than 30 s *and* `process.kill(pid, 0)` throws;
-`runs clean` moves orphans to history with `status: "orphaned"`.
+`runs clean` moves orphans to history with **state `FAILED`** and a summary rebuilt from
+`events.jsonl`. (This said `status: "orphaned"` until Phase G was built: `RunState` uses
+v4 §21's names per hedge H6 and has no `orphaned` member, and inventing one would have
+undone that hedge for a single bookkeeping case. "Orphaned" stays a *detection* result
+(`isOrphaned`) and a dashboard marker, not a persisted state.)
 
 **C3 enforcement (test it, don't assume it):** what goes on disk is the metadata above plus
 canonical events. `taskTitle` = first line of the prompt, ≤120 chars, redacted;
