@@ -1,3 +1,4 @@
+import type { ChildProcess } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import type { RouterConfig } from "../core/config.js";
@@ -17,7 +18,12 @@ import type { AgentRole, WorkerEvent } from "../events/types.js";
 import { createStreamAdapter } from "../events/claude-adapter.js";
 import { attachProgress, resolveProgressMode } from "../tui/progress.js";
 import type { ProgressMode } from "../tui/progress.js";
-import { createRun, finishRun, listActive, pruneHistory, taskHashOf, taskTitleOf } from "./registry.js";
+import { buildCheckpoint, writeCheckpoint } from "./checkpoint.js";
+import { startDrainWatch, terminateChild } from "./drain.js";
+import type { DrainAssessment } from "./drain.js";
+import { writeHandoffBundle } from "../handoff/bundle.js";
+import { handoffSummaryLines, writeHandoffResult } from "../handoff/parent-handoff.js";
+import { createRun, finishRun, listActive, pruneHistory, taskHashOf, taskTitleOf, updateRun } from "./registry.js";
 import { startHeartbeat } from "./heartbeat.js";
 import type { HeartbeatHandle } from "./heartbeat.js";
 import { openRunStore, summarize } from "./store.js";
@@ -98,6 +104,9 @@ export interface WorkerRunOptions {
   }) => Promise<BudgetSnapshot>;
   /** How many runs are active besides none — injectable so the sample rule is testable. */
   readonly activeRunCount?: () => number;
+  /** Drain-poll timers, injectable so a test never waits a real pollIntervalSec. */
+  readonly setIntervalImpl?: (tick: () => void, ms: number) => { unref?: () => void };
+  readonly clearIntervalImpl?: (handle: unknown) => void;
 }
 
 export interface WorkerRunResult {
@@ -262,6 +271,46 @@ export async function runInstrumented(options: WorkerRunOptions): Promise<Worker
   let childCode: number | null = null;
   let spawnFailure: unknown = null;
   let heartbeat: HeartbeatHandle | null = null;
+  let filesTouched = 0;
+  // How many tools the child has opened and not yet closed. Zero means the run
+  // is BETWEEN tools, which is the only moment stopping it is safe.
+  let toolsInFlight = 0;
+
+  // The drain state machine (Phase F). `requested` is set by the budget poll;
+  // it only becomes `terminating` at a safe boundary, which is the whole
+  // point — the router acts on events it has already received, so the boundary
+  // is a ToolCompleted or a turn start, never the middle of an Edit.
+  // Held in one object rather than two `let`s so the compiler keeps the union
+  // wide: every write happens inside a callback, which control-flow analysis
+  // cannot see, and a narrowed `drain.state` would make the handoff check below
+  // look statically impossible.
+  const drain: { state: "none" | "requested" | "terminating"; reason: string } = {
+    state: "none",
+    reason: "quota_low",
+  };
+  let child: ChildProcess | null = null;
+
+  const stopAtBoundary = (): void => {
+    if (drain.state !== "requested" || child === null) {
+      return;
+    }
+    drain.state = "terminating";
+    try {
+      const written = writeCheckpoint(dir, buildCheckpoint(seen));
+      if (written !== null) {
+        bus.emit({ type: "CheckpointCreated", path: written, phase: buildCheckpoint(seen).phase });
+      }
+      updateRun(home, id, { state: "CHECKPOINTING" });
+      bus.emit({ type: "HandoffStarted", reason: drain.reason });
+    } catch (error) {
+      logger.debug(`worker-run: checkpoint before drain failed: ${errorMessage(error)}`);
+    }
+    // Fire-and-forget: the spawn promise is what actually tells us the child
+    // is gone, and awaiting here would block the event dispatch that feeds it.
+    void terminateChild(child).catch((error: unknown) => {
+      logger.debug(`worker-run: terminating the child failed: ${errorMessage(error)}`);
+    });
+  };
 
   const dispatch = (events: readonly EventInput[]): void => {
     for (const event of events) {
@@ -271,7 +320,32 @@ export async function runInstrumented(options: WorkerRunOptions): Promise<Worker
       if (event.type === "RunCompleted") {
         sawRunCompleted = true;
       }
+      if (event.type === "ToolStarted") {
+        toolsInFlight += 1;
+      }
+      if (event.type === "ToolCompleted" || event.type === "ToolDenied") {
+        toolsInFlight = Math.max(0, toolsInFlight - 1);
+      }
+      if (event.type === "FileChanged") {
+        // Counted here rather than re-derived later: this is the test for
+        // "did this run leave work on disk", which decides whether a dead run
+        // gets a bundle.
+        filesTouched += 1;
+      }
       bus.emit(event);
+      // Safe boundary, checked AFTER the event is on the bus so the stream
+      // that justified stopping is recorded before the child goes away.
+      // `ToolDenied` counts: A0 settled that a denial means the tool never
+      // ran, so the child is as safely between tools as after a completion —
+      // and leaving it out would make a run whose tools keep getting denied
+      // undrainable, with no boundary ever arriving.
+      if (
+        event.type === "ToolCompleted" ||
+        event.type === "ToolDenied" ||
+        event.type === "TurnStarted"
+      ) {
+        stopAtBoundary();
+      }
     }
   };
 
@@ -362,27 +436,97 @@ export async function runInstrumented(options: WorkerRunOptions): Promise<Worker
     logger.debug(`worker-run: heartbeat unavailable: ${errorMessage(error)}`);
   }
 
+  // Watching the budget is observation: it always runs when the router is
+  // quota-aware. What it is ALLOWED to do when it fires is the part gated by
+  // handoffOnLowQuota (D3) — see onAtRisk below.
+  const drainWatch =
+    preflight.decision !== null && options.config.routing.quotaAware
+      ? startDrainWatch({
+          config: options.config,
+          readBudget: () =>
+            (options.budgetSource ?? fetchBudget)({
+              home,
+              key: preflightKey(options),
+              refresh: true,
+              ttlSec: 0,
+            }),
+          estimate: () =>
+            estimateCost(home, preflight.taskKind, model, options.config.models.fast),
+          turnsDone: () => currentTurn,
+          maxTurns: maxTurnsOf(options.args),
+          onAtRisk: (assessment) => onAtRisk(assessment),
+          setIntervalImpl: options.setIntervalImpl,
+          clearIntervalImpl: options.clearIntervalImpl,
+        })
+      : null;
+
+  function onAtRisk(assessment: DrainAssessment): void {
+    try {
+      bus.emit({
+        type: "BudgetWarning",
+        zone: assessment.zone,
+        remainingRatio: preflight.remainingRatio,
+        usableBudget: round2(assessment.usableBudget),
+        estimatedRemaining: round2(assessment.projectedCost),
+      });
+      // The checkpoint ALWAYS happens: it is observation, it costs nothing and
+      // it interrupts nobody, so a run that later dies for any reason already
+      // has one on disk.
+      writeCheckpoint(dir, buildCheckpoint(seen));
+      stderr.write(
+        `[Router] ${assessment.zone}: ${round2(assessment.projectedCost)} credits still projected ` +
+          `vs ${round2(assessment.usableBudget)} usable — checkpoint written\n`,
+      );
+    } catch (error) {
+      logger.debug(`worker-run: drain warning failed: ${errorMessage(error)}`);
+    }
+    if (!options.config.routing.handoffOnLowQuota) {
+      // D3's most invasive switch, off in 2.0.0: observe and warn, never kill
+      // a live child. Bundle-on-death below is what protects the worktree.
+      return;
+    }
+    drain.state = "requested";
+    drain.reason = `quota_low:${assessment.zone}`;
+    updateRun(home, id, { state: "DRAINING" });
+    // A run with a tool in flight stops at the NEXT boundary, from dispatch.
+    // Only a run already sitting between tools may be stopped here — otherwise
+    // this "nudge" would terminate mid-Edit and defeat the entire safe-boundary
+    // guarantee, which is the one thing this path exists to provide.
+    if (toolsInFlight === 0) {
+      stopAtBoundary();
+    }
+  }
+
   try {
     // Both flags together: claude 2.1.278 rejects stream-json without
     // --verbose (captured evidence, A0). Callers reach here only when
     // shouldObserve is true, so no --output-format is already present.
-    const child = await (options.spawnImpl ?? spawnAgentStream)(options.claudePath, {
+    const result = await (options.spawnImpl ?? spawnAgentStream)(options.claudePath, {
       args: [...options.args, "--output-format", "stream-json", "--verbose"],
       cwd: options.cwd,
       env: childEnv,
       onStdoutLine: handleStdoutLine,
       onStderrLine: handleStderrLine,
+      onSpawn: (spawned) => {
+        child = spawned;
+      },
     });
-    childCode = child.code;
+    childCode = result.code;
   } catch (error) {
     spawnFailure = error;
   } finally {
     // Always: a leaked ticker would keep the process open and keep emitting
     // events into a run that is already over.
     heartbeat?.stop();
+    drainWatch?.stop();
   }
 
-  if (finalText !== undefined) {
+  const handedOff = drain.state === "terminating";
+  // C1, and the one exception to it: a handed-off run has no final answer —
+  // it was stopped — so stdout carries the HandoffResult instead. Printing a
+  // partial answer alongside the JSON would give the parent two things to
+  // parse and no way to know which is authoritative.
+  if (finalText !== undefined && !handedOff) {
     stdout.write(finalText.endsWith("\n") ? finalText : finalText + "\n");
   }
   if (spawnFailure !== null) {
@@ -405,6 +549,50 @@ export async function runInstrumented(options: WorkerRunOptions): Promise<Worker
   // have been wrong. Both halves are best-effort and never fail the run.
   const summary = summarize(seen);
   const actualCredits = await closeMeasurement(options, home, preflight, model, role, summary);
+
+  const cleanSuccess = childCode === ExitCode.Success && sawRunCompleted && !handedOff;
+
+  // **Bundle-on-death.** This is what actually satisfies doc §23's "no working
+  // tree changes lost", and it holds with EVERY switch off: any ending that is
+  // not a clean success, where the run touched at least one file, gets the
+  // full bundle. When quota really runs out the child just dies on an API
+  // error — at that moment the work is already invisible to the orchestrator
+  // unless somebody writes it down.
+  let bundlePath: string | null = null;
+  if (!cleanSuccess && filesTouched > 0 && registered) {
+    const bundle = await writeHandoffBundle({
+      runDir: dir,
+      runId: id,
+      cwd: options.cwd,
+      reason: handedOff ? drain.reason : "child_error",
+      checkpoint: buildCheckpoint(seen),
+      role,
+      model,
+    });
+    bundlePath = bundle?.handoffMd ?? null;
+    if (bundlePath !== null && !handedOff) {
+      // Not a handoff: the exit code stays v1's 40 (C4) and stdout keeps the
+      // final text. The bundle is a stderr breadcrumb, not a protocol change.
+      try {
+        stderr.write(`[Router] work was left on disk; handoff bundle: ${bundlePath}\n`);
+      } catch (error) {
+        logger.debug(`worker-run: announcing the bundle failed: ${errorMessage(error)}`);
+      }
+    }
+  }
+
+  // Before finishRun, which deletes the active file: HANDOFF is a live state,
+  // and the only place it can ever be seen is `runs --active` while the run is
+  // still registered. Recording it afterwards would write to a file that no
+  // longer exists.
+  if (handedOff) {
+    try {
+      bus.emit({ type: "HandoffCompleted", reason: drain.reason, bundlePath: bundlePath ?? "" });
+      updateRun(home, id, { state: "HANDOFF" });
+    } catch (error) {
+      logger.debug(`worker-run: recording the handoff failed: ${errorMessage(error)}`);
+    }
+  }
 
   try {
     if (registered) {
@@ -430,6 +618,29 @@ export async function runInstrumented(options: WorkerRunOptions): Promise<Worker
     logger.debug(`worker-run: writing summary failed: ${errorMessage(error)}`);
   }
 
+  let code: number = cleanSuccess ? ExitCode.Success : ExitCode.ChildAgentFailed;
+  if (handedOff) {
+    const checkpoint = buildCheckpoint(seen);
+    code = writeHandoffResult(
+      { stdout, stderr },
+      {
+        status: "handoff_required",
+        run_id: id,
+        reason: drain.reason,
+        completed: checkpoint.completed,
+        pending: checkpoint.pending,
+        handoff_path: bundlePath,
+      },
+      handoffSummaryLines({
+        runId: id,
+        reason: drain.reason,
+        bundlePath,
+        completed: checkpoint.completed,
+        pending: checkpoint.pending,
+      }),
+    );
+  }
+
   detachProgress();
   try {
     store?.close();
@@ -438,8 +649,6 @@ export async function runInstrumented(options: WorkerRunOptions): Promise<Worker
   }
   bus.close();
 
-  const code =
-    childCode === ExitCode.Success && sawRunCompleted ? ExitCode.Success : ExitCode.ChildAgentFailed;
   return { code, runId: id, runDir: dir };
 }
 
@@ -514,8 +723,12 @@ function writeRefusal(
 ): void {
   const estimated = round2(decision.estimatedCost);
   const usable = round2(decision.usableBudget);
-  stdout.write(
-    JSON.stringify({
+  // Same emitter as the mid-run handoff: 41 and 42 differ in what already
+  // happened, not in what the parent has to parse, and one writer is what
+  // keeps that true.
+  writeHandoffResult(
+    { stdout, stderr },
+    {
       status: "handoff_required",
       run_id: id,
       reason: "quota_insufficient",
@@ -524,13 +737,10 @@ function writeRefusal(
       handoff_path: null,
       estimated_cost: estimated,
       usable_quota: usable,
-    }) + "\n",
+    },
+    [formatGlmError(Errors.quotaInsufficient(estimated, usable))],
+    ExitCode.QuotaInsufficient,
   );
-  try {
-    stderr.write(formatGlmError(Errors.quotaInsufficient(estimated, usable)) + "\n");
-  } catch (error) {
-    logger.debug(`worker-run: writing the refusal diagnostic failed: ${errorMessage(error)}`);
-  }
 }
 
 /**
@@ -586,6 +796,18 @@ async function closeMeasurement(
     logger.debug(`worker-run: closing the cost measurement failed: ${errorMessage(error)}`);
     return null;
   }
+}
+
+/**
+ * The child's turn ceiling, read back out of the argv we are about to pass it.
+ * The drain projection needs it to know how much of the task is still ahead,
+ * and argv is the single source of truth — `buildWorkerArgs` already resolved
+ * config and profile overlays into this number.
+ */
+function maxTurnsOf(args: readonly string[]): number {
+  const index = args.indexOf("--max-turns");
+  const value = index >= 0 ? Number(args[index + 1]) : Number.NaN;
+  return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 /** Credits are reported to two decimals; the endpoint's own numbers are integers. */

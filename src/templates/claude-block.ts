@@ -46,4 +46,13 @@ After worker completion:
 4. resolve integration problems
 5. accept only after verification
 
+Worker exit codes 41 and 42 are NOT crashes:
+
+- stdout carries one JSON object: \`{"status":"handoff_required", ...}\`
+- read \`handoff_path\` — a handoff.md with what was done, what remains, files
+  changed, and untracked files that are NOT in diff.patch
+- continue the task yourself in the SAME worktree, starting from "Remaining"
+- do not re-run the worker until quota resets
+- 41 means nothing was spawned; 42 means work was done and is preserved
+
 <!-- glm-coding-router:end -->`;

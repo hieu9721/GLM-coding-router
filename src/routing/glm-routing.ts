@@ -86,9 +86,7 @@ export function decideRoute(input: {
   const routing = config.routing;
 
   const zone = zoneFor(snapshot, routing);
-  const binding = bindingWindow(snapshot);
-  const reserve = routing.reserveRatio * binding.limit;
-  const usableBudget = Math.max(0, binding.remaining - reserve);
+  const usableBudget = usableBudgetOf(snapshot, routing.reserveRatio);
 
   const costOf = (estimate: CostEstimate): number => estimate.p90 * routing.safetyFactor;
   const fits = (estimate: CostEstimate): boolean => costOf(estimate) <= usableBudget;
@@ -154,6 +152,20 @@ export function decideRoute(input: {
  * reading. (confidence "unknown" never reaches here with real numbers —
  * decideRoute fails open first — and its zero windows tie harmlessly.)
  */
+/**
+ * Credits this run may actually spend: the binding window's remaining, less
+ * the untouchable reserve, floored at 0.
+ *
+ * Exported because the Phase F drain controller re-asks the same question
+ * every poll, and two implementations of one piece of arithmetic would drift
+ * — preflight and mid-run draining have to agree on what "affordable" means
+ * or the router contradicts itself halfway through a run.
+ */
+export function usableBudgetOf(snapshot: BudgetSnapshot, reserveRatio: number): number {
+  const binding = bindingWindow(snapshot);
+  return Math.max(0, binding.remaining - reserveRatio * binding.limit);
+}
+
 function bindingWindow(snapshot: BudgetSnapshot): BudgetWindow {
   const { fiveHour, weekly } = snapshot;
   if (fiveHour.remainingRatio !== weekly.remainingRatio) {
