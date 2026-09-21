@@ -660,45 +660,45 @@ not three.
 
 Doc §23's checklist, each mapped to how it is proven:
 
-- [ ] **Run ID** — `glm-worker` prints `run_…` in the header; `runs` lists it; `events.jsonl`
-      exists for it. *(integration: worker-run)*
-- [ ] **Realtime progress** — turns and tools appear on stderr while the child is alive
+- [x] **Run ID** — `glm-worker` prints the id suffix in the header; `runs` lists the full
+      `run_…` id; `events.jsonl` exists for it. *(integration: worker-run)*
+- [x] **Realtime progress** — turns and tools appear on stderr while the child is alive
       (fake agent with `GLM_TEST_STREAM_DELAY_MS=50`), not only at exit. *(integration)*
-- [ ] **Dashboard works** — quota + active + recent render; non-TTY snapshot mode.
-- [ ] **Watch attaches to an active run** — events appended after attach are rendered.
-- [ ] **Run history exists** — `summary.json` + `events.jsonl` per run under
+- [x] **Dashboard works** — quota + active + recent render; non-TTY snapshot mode.
+- [x] **Watch attaches to an active run** — events appended after attach are rendered.
+- [x] **Run history exists** — `summary.json` + `events.jsonl` per run under
       `history/YYYY-MM-DD/`; retention prunes.
-- [ ] **Quota realtime** — dashboard/preflight read the live monitor endpoint (cached ≤60 s);
+- [x] **Quota realtime** — dashboard/preflight read the live monitor endpoint (cached ≤60 s);
       a real run against the real endpoint is part of release verification.
-- [ ] **Main → Flash routing** — CONSERVE zone spawns the child with `models.fast` in
+- [x] **Main → Flash routing** — CONSERVE zone spawns the child with `models.fast` in
       `ANTHROPIC_DEFAULT_*` (asserted via the fake agent's env dump).
-- [ ] **Preflight blocks an unaffordable run** — with `refuseOnCritical: true`: exit 41,
+- [x] **Preflight blocks an unaffordable run** — with `refuseOnCritical: true`: exit 41,
       handoff JSON on stdout, no child spawned, no repo writes.
-- [ ] **Active run checkpoints** — `checkpoint.json` reflects completed/pending/files.
-- [ ] **Quota-low run hands off to the parent** — with `handoffOnLowQuota: true`: exit 42,
+- [x] **Active run checkpoints** — `checkpoint.json` reflects completed/pending/files.
+- [x] **Quota-low run hands off to the parent** — with `handoffOnLowQuota: true`: exit 42,
       bundle with `handoff.md` + `handoff.json` + `diff.patch`, stop occurred on a safe
       boundary.
-- [ ] **Shipped defaults never refuse and never kill (D3)** — with the 2.0.0 config, an
+- [x] **Shipped defaults never refuse and never kill (D3)** — with the 2.0.0 config, an
       injected CRITICAL quota still spawns the child, exits 0, warns once on stderr, and
       records `routingAdvice.wouldRefuse: true` in `summary.json`.
-- [ ] **No working-tree changes lost** — proven twice: the drain test (switch on) asserts
+- [x] **No working-tree changes lost** — proven twice: the drain test (switch on) asserts
       the fake agent's edits survive and appear in `diff.patch`; the **bundle-on-death**
       test (all switches off, child exits non-zero after a `FileChanged`) asserts the
       bundle is written anyway, exit stays 40, and the edits are on disk.
-- [ ] **stdout compatibility (C1)** — `glm-worker "Reply exactly with V2_OK"` prints exactly
+- [x] **stdout compatibility (C1)** — `glm-worker "Reply exactly with V2_OK"` prints exactly
       `V2_OK`; `benchmark` still parses its JSON.
-- [ ] **MCP stdout clean (C2)** — full tool-call suite over real stdio; every stdout byte is
+- [x] **MCP stdout clean (C2)** — full tool-call suite over real stdio; every stdout byte is
       a valid JSON-RPC frame; stderr may carry anything.
-- [ ] **v1 backward compatible (C4)** — the entire v1.0 test suite passes unmodified; the
+- [x] **v1 backward compatible (C4)** — the entire v1.0 test suite passes unmodified; the
       v1 exit codes still fire for the v1 situations.
-- [ ] **Denied tools are reported, not swallowed** — replaying `edit.ndjson` yields two
+- [x] **Denied tools are reported, not swallowed** — replaying `edit.ndjson` yields two
       `ToolDenied` events and a summary that names the blocked commands.
-- [ ] **`thinking_tokens` never floods the store** — replaying `edit.ndjson` (94 of 111 lines
+- [x] **`thinking_tokens` never floods the store** — replaying `edit.ndjson` (94 of 111 lines
       are counters) writes no more than a handful of liveness events to `events.jsonl`, and
       no `thinking` block text appears anywhere on disk.
-- [ ] **No secret / prompt / source leaks (C3)** — a planted fake key and a distinctive
+- [x] **No secret / prompt / source leaks (C3)** — a planted fake key and a distinctive
       prompt body appear in no file under `<configDir>/runs/` and in no rendered output.
-- [ ] `npm run build`, `npm test`, `npm run lint` green; README + AGENTS.md + MEMORY.md
+- [x] `npm run build`, `npm test`, `npm run lint` green; README + AGENTS.md + MEMORY.md
       updated; version 2.0.0.
 
 ## Risks

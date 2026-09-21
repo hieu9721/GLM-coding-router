@@ -41,6 +41,10 @@ Claude / Codex → shell → glm-worker → claude.exe harness → Z.ai endpoint
                     GLM-5.3 / GLM-5.3-Flash
 ```
 
+For headless worker/review runs, the router also consumes Claude Code's stream-json output,
+records a provider-neutral event history, and renders progress on stderr. Interactive
+`glm-chat` / `glm-fast` sessions keep the direct pass-through path shown above.
+
 ## Requirements
 
 - Windows 10/11 or Linux (both verified); macOS is experimental — the suite has not been
@@ -127,6 +131,11 @@ read when they carry a prompt — waiting for EOF on a pipe that never closes (a
 harness, CI, `nohup`) would hang the run before it started. The worker runs with
 `--max-turns 20 --permission-mode acceptEdits --tools Read,Glob,Grep,Edit,Write,Bash`.
 It never uses `--dangerously-skip-permissions`.
+
+Routing flags (v2): `--model main|fast` pins the config slot for this run (it does not
+bypass an enforced refusal), `--force` overrides one, `--refresh-quota` re-reads the
+Z.ai quota instead of the 60 s cache — see [Quota-aware routing](#quota-aware-routing-v2).
+Like `--profile`, they belong to the wrapper and are consumed before the prompt is read.
 
 ## glm-review
 
@@ -263,6 +272,93 @@ glm-router usage
 
 `--json` emits the same data machine-readably. No key configured → `ERROR [10]`.
 
+## Run observability (v2)
+
+Every `glm-worker` / `glm-review` run — and every MCP `glm_worker` / `glm_review` call —
+is instrumented: the child runs with `--output-format stream-json`, events are recorded
+under `<configDir>/runs/`, and progress renders live on **stderr**. Stdout stays exactly
+the final assistant text, so pipes, orchestrators, and `benchmark` keep working unchanged.
+
+- `runs/history/YYYY-MM-DD/<runId>/` holds `events.jsonl` (one JSON event per line) and
+  `summary.json`; `runs/active/` registers live runs with a heartbeat.
+- Progress modes: `rich` (box + turn tree, TTY only), `nested` (one `[GLM] …` line per
+  significant event — the default when stderr is piped), `off`. `--no-progress`,
+  `--quiet`, or `CI=true` force `off`; `GLM_ROUTER_PROGRESS=off|rich|nested` and
+  `GLM_ROUTER_NESTED=1` override config; `ui.mode` is the standing default.
+- `GLM_ROUTER_OBSERVE=off` restores the exact v1 path (also automatic when the caller
+  passes its own `--output-format`, as `benchmark` does).
+
+```powershell
+glm-router runs                     # id, state, model, started, duration, turns, files
+glm-router runs --active --limit 5
+glm-router runs show <runId>        # metadata, summary, per-turn tool tree
+glm-router runs logs <runId>        # events.jsonl, one line per event (--json = raw)
+glm-router runs clean --dry-run --orphans  # preview retention prune + orphan reap
+glm-router watch                    # attach to the newest active run, follow live
+glm-router dashboard                # quota + active runs + recent runs
+```
+
+- `runs show` accepts a unique id suffix; the whole family supports `--json`.
+- `runs clean --older-than 30d` prunes by age, `--orphans` reaps active runs whose
+  process is gone; history is also pruned at run start (`history.retentionDays: 30`,
+  `history.maxRuns: 1000` by default).
+- `watch [run-id] [--from-start]` renders through the same renderer as a live run; no active
+  run → a message, exit 0.
+- `dashboard` repaints every `--interval` seconds (default 2) on a TTY; piped, it
+  prints one snapshot and exits. Ctrl+C quits the live view.
+
+**Checkpoints and handoff bundles.** A run that dies with work on disk — child failure,
+crash, kill — always leaves a bundle in `<runDir>/handoff/`: `checkpoint.json` (phase,
+completed turns, pending work, files changed, validations owed), `diff.patch` (the real
+`git diff`; the router never runs `git add`, so untracked files are listed separately),
+`handoff.md`, and `handoff.json`. The bundle path is printed to stderr. Outside a git
+repo the bundle is still written, minus the patch.
+
+## Quota-aware routing (v2)
+
+Before spawning, the router reads the Z.ai quota (cached 60 s), classifies the task, and
+estimates its cost (p90 from `cost-samples.jsonl` history, else a built-in baseline).
+The binding window (5-hour vs weekly, whichever is lower) picks a zone: HEALTHY runs the
+main model; CONSERVE, HANDOFF_READY, and CRITICAL prefer the fast one. If main does not
+fit the usable budget but fast does, the run is downgraded — never the reverse. Endpoint
+unreachable, no key, or an empty payload → `confidence: "unknown"` → run normally and
+warn once on stderr: a monitoring outage never blocks work.
+
+Defaults in 2.0.0: `quotaAware: true`, but `refuseOnCritical: false` and
+`handoffOnLowQuota: false` — the shipped router observes, downgrades, and warns; it
+never refuses a run and never kills a live child. Every `summary.json` records
+`routingAdvice` (`zone`, `wouldRefuse`, `estimatedCost`, `actualCredits`), the evidence
+for revisiting those switches later.
+
+```json
+{
+  "routing": {
+    "quotaAware": true, "refuseOnCritical": false, "handoffOnLowQuota": false,
+    "reserveRatio": 0.10, "safetyFactor": 1.3,
+    "preferFlashBelow": 0.30, "handoffReadyBelow": 0.15, "criticalBelow": 0.08,
+    "pollIntervalSec": 60, "quotaCacheTtlSec": 60
+  },
+  "history": { "retentionDays": 30, "maxRuns": 1000 },
+  "ui": { "mode": "auto", "color": true }
+}
+```
+
+Ratio fields must satisfy `0 < x < 1` and stay ordered
+(`criticalBelow < handoffReadyBelow < preferFlashBelow`), else `ERROR [11]`.
+
+**Exit 41 / 42 — unfinished, not crashed.** Both mean "work preserved", and both print a
+`HandoffResult` JSON on stdout:
+
+- **41 `QUOTA_INSUFFICIENT`** — preflight refused to spawn anything (reachable only
+  with `refuseOnCritical: true`). Nothing ran, and no run-history or repository files
+  were written; `--model fast` may fit the budget, `--force` overrides the refusal.
+- **42 `HANDOFF_REQUIRED`** — a live run was stopped at a safe tool boundary and handed
+  back (reachable only with `handoffOnLowQuota: true`); the JSON carries `handoff_path`.
+
+An orchestrator reads 41/42 as "continue in the same worktree", never as "the worker
+broke". A child that fails on its own still exits 40 — the handoff bundle is written
+anyway.
+
 ## Agent skills (Claude Code + Codex)
 
 `glm-router skill install` writes the `glm-delegation` SKILL.md into **both**
@@ -294,7 +390,9 @@ glm-router mcp remove      # claude mcp remove -s user glm-coding-router
 
 Tool-level failures return `isError` results (missing key, no claude, outside
 a git repo, unreachable endpoint); the server never prints anything to stdout
-except JSON-RPC frames.
+except JSON-RPC frames. MCP-driven runs are recorded like any other (registry on,
+progress renderer off), so they appear in `glm-router runs` and `dashboard` while
+the protocol channel stays clean.
 
 ## CLI reference
 
@@ -309,6 +407,9 @@ glm-router config set models.main glm-5.3
 glm-router delegate <name>   run a GLM worker in an isolated git worktree
 glm-router benchmark         measure the Claude+GLM stack on built-in tasks
 glm-router usage             Z.ai quota snapshot + local benchmark totals
+glm-router runs              inspect recorded runs (show / logs / clean subcommands)
+glm-router watch [run-id]    attach to an active run and follow its progress
+glm-router dashboard         quota + active runs + recent runs
 glm-router mcp               optional MCP server registration (glm-mcp)
 glm-router project init      CLAUDE.md / AGENTS.md managed blocks (--dry-run supported)
 glm-router project remove
@@ -384,6 +485,10 @@ The key is never cached to disk.
 | The worker creates files but never runs the tests | Its Bash allowlist is empty. `glm-router config show` → `worker.allowedBash`; the default list covers common test commands |
 | `glm-*` not on PATH after install | Reopen the terminal; check `npm config get prefix` is on PATH |
 | `ERROR [MANAGED_BLOCK_CORRUPT]` | Fix the marker pair in the named file manually, then re-run |
+| Exit 41 `QUOTA_INSUFFICIENT` | Preflight refused the run (only with `routing.refuseOnCritical: true`). Wait for the window to reset, use `--model fast`, or `--force` |
+| Exit 42 `HANDOFF_REQUIRED` | Not a crash — the run handed off with a bundle. Read `handoff_path` in the stdout JSON and continue in the same worktree |
+| A run lists as FAILED with no summary | It died mid-run; `runs show <id>` rebuilds the summary from `events.jsonl`, `runs clean --orphans` reaps stale active entries |
+| `runs/` history grows large | `glm-router runs clean --older-than 30d`, or tune `history.retentionDays` / `history.maxRuns` |
 
 Run `glm-router doctor` (add `--network` to probe the Z.ai endpoint) for a full diagnosis.
 
@@ -420,8 +525,9 @@ npm test
 npm publish
 ```
 
-`prepublishOnly` runs build + tests. The package ships only `dist/`; the four binaries
-(`glm-router`, `glm-chat`, `glm-fast`, `glm-worker`, `glm-review`) are declared in `bin`.
+`prepublishOnly` runs build + tests. The package ships only `dist/`; the six binaries
+(`glm-router`, `glm-chat`, `glm-fast`, `glm-worker`, `glm-review`, `glm-mcp`) are declared
+in `bin`.
 
 ## License
 

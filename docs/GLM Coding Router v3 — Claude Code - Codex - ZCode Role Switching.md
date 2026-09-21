@@ -20,7 +20,7 @@ Execution Stacks / Providers
 Provider IDs:
 
 ```text
-claude.code
+anthropic.claude-code
 openai.codex
 zai.zcode
 ```
@@ -106,7 +106,7 @@ Provider:
 
 ```ts
 type ProviderId =
-  | "claude.code"
+  | "anthropic.claude-code"
   | "openai.codex"
   | "zai.zcode";
 ```
@@ -327,7 +327,7 @@ Role Engine chỉ route role sang provider support capability tương ứng.
 roles:
 
   planner:
-    primary: claude.code
+    primary: anthropic.claude-code
     fallback:
       - openai.codex
       - zai.zcode
@@ -336,10 +336,10 @@ roles:
     primary: zai.zcode
     fallback:
       - openai.codex
-      - claude.code
+      - anthropic.claude-code
 
   reviewer:
-    primary: claude.code
+    primary: anthropic.claude-code
     fallback:
       - openai.codex
 ```
@@ -365,7 +365,7 @@ roles:
     primary: openai.codex
 
   worker:
-    primary: claude.code
+    primary: anthropic.claude-code
 
   reviewer:
     primary: openai.codex

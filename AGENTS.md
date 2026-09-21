@@ -26,8 +26,9 @@ Claude Code / Codex → shell command → glm-chat / glm-worker / glm-review →
 ```
 
 - `src/cli.ts` — main CLI entry (`glm-router`), built with commander. Each subcommand
-  (`init`, `doctor`, `status`, `key`, `config`, `delegate`, `benchmark`, `usage`, `mcp`, `project`,
-  `skill`, `uninstall`) lives in `src/commands/` and is wired here.
+  (`init`, `doctor`, `status`, `key`, `config`, `delegate`, `benchmark`, `usage`, `runs`,
+  `watch`, `dashboard`, `mcp`, `project`, `skill`, `uninstall`) lives in `src/commands/`
+  and is wired here.
 - `src/bin/{glm-chat,glm-fast,glm-worker,glm-review}.ts` — the four thin task binaries that
   resolve the Z.ai key, locate `claude.exe`, build the injected env, and spawn the child process.
   `glm-chat` is interactive; `glm-fast` is interactive pinned to the fast model; `glm-worker`
@@ -36,7 +37,11 @@ Claude Code / Codex → shell command → glm-chat / glm-worker / glm-review →
   `--tools Read,Glob,Grep`. All four accept `--profile <name>` (see `specs/glm-fast-profiles.md`).
 - `src/core/` — shared runtime: `config.ts` (zod-validated config), `paths.ts`, `zai-key.ts` (key
   resolution), `claude.ts` (`locateClaude`/`locateCodex` discovery), `env.ts` (`createGlmEnv`,
-  the child-only environment), `process.ts` (`spawnAgent`), `prompt.ts` (stdin/args resolution),
+  the child-only environment), `process.ts` (`spawnAgent`, plus `spawnAgentStream` for
+  piped/observed runs), `prompt.ts` (stdin/args resolution), `zai-quota.ts` (the Z.ai
+  monitor client shared by `usage`, the budget manager and `dashboard`),
+  `routing-flags.ts` (`--model main|fast` / `--force` / `--refresh-quota`, stripped from
+  argv before the prompt is read),
   `profile.ts` (`extractProfileFlag`/`applyProfile`), `git.ts` (`runGit`/`gitTopLevel` for
   delegate), `worktree.ts` (delegate worktree lifecycle, see `specs/delegate-worktrees.md`),
   `platform.ts` (`platformSupport`/`platformName`), `user-env.ts` (per-user secret store
@@ -55,6 +60,25 @@ Claude Code / Codex → shell command → glm-chat / glm-worker / glm-review →
 - `src/mcp/` — the glm-mcp MCP server (stdio JSON-RPC, tools built on core primitives only —
   never on the CLI commands, stdout is the protocol channel; specs/v1-architecture.md). Bin
   `src/bin/glm-mcp.ts` wires the readline loop; `glm-router mcp` registers it via `claude mcp add`.
+- `src/events/` — the v2 event model (specs/v2-architecture.md): `types.ts` (the canonical
+  `WorkerEvent` union, every event in a `{runId, taskId, provider, role, seq, ts}` envelope),
+  `bus.ts` (stamps envelopes, synchronous dispatch), `claude-adapter.ts` (Claude stream-json
+  → events; pure and never throws).
+- `src/runs/` — run identity and persistence: `ulid.ts` (`run_…` ids), `registry.ts`
+  (active + history, retention pruning), `store.ts` (`events.jsonl`/`summary.json`),
+  `heartbeat.ts`, `checkpoint.ts`, `drain.ts` (safe-boundary stop, gated on
+  `routing.handoffOnLowQuota`), `worker-run.ts` (the single orchestration path behind
+  `glm-worker` / `glm-review` / the MCP tools — preflight, spawn, record, handoff).
+- `src/budget/` — `manager.ts` (Z.ai quota snapshot + 60 s cache, fail-open) and
+  `estimator.ts` (task classification, p50/p90 from `cost-samples.jsonl` or the baseline).
+- `src/routing/glm-routing.ts` — `decideRoute`, the pure preflight decision: zone → model
+  preference, one-way downgrade, `wouldRefuse` (enforced as exit 41 only when
+  `routing.refuseOnCritical` is on).
+- `src/handoff/` — `bundle.ts` (the `handoff/` dir: checkpoint, `diff.patch`, `handoff.md`,
+  `handoff.json`; written whenever a run dies with work on disk) and `parent-handoff.ts`
+  (`HandoffResult` JSON on stdout, exit 41/42).
+- `src/tui/` — all ANSI behind `render.ts`; `progress.ts` is the stderr renderer
+  (`rich` on a TTY, `nested` `[GLM]` lines when piped, `off`).
 - `tests/{unit,integration,fixtures}` — integration tests exercise the real command surface
   against `tests/fixtures/fake-agent.mjs` standing in for `claude.exe`.
 

@@ -71,7 +71,7 @@ export function extractNoBashFlag(argv: readonly string[]): {
 
 /**
  * glm-worker (spec §15, §16): headless implementation worker.
- * Prompt priority: stdin → arguments → error. Never uses
+ * Prompt priority: arguments → stdin → error. Never uses
  * --dangerously-skip-permissions.
  */
 export async function runWorker(argv: readonly string[]): Promise<number> {
