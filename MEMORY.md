@@ -100,9 +100,19 @@ and run `glm-worker` inside an Orca embedded terminal.
 
 ## Session log
 
-Entries for **v0.1 → 1.1.2** (publishes, registry verifications, the Linux and Windows
-platform gates, the F1–F6 defect trail) are archived in [memory/2026-09.md](memory/2026-09.md).
-Everything below is v2 work in progress.
+Entries for **v0.1 → 1.1.2** are archived one file per day — open the day you need, not all of it:
+
+- [memory/2026-09-17.md](memory/2026-09-17.md) — v0.1 built, published and verified; v0.2.
+  The DI refactor, the first delegation to `glm-worker`, and the stale-0.1.0 incident that
+  created the registry-verification ritual.
+- [memory/2026-09-18.md](memory/2026-09-18.md) — v0.3 → v1.0. `delegate`/worktrees,
+  `benchmark`, `usage` against the live quota endpoint, the dual-agent skill and `glm-mcp`.
+- [memory/2026-09-20.md](memory/2026-09-20.md) — the Linux day, the v2 design (D1–D6), and
+  1.1.0 → 1.1.2 including **F6**, where `glm-review`'s read-only guarantee was defeated by
+  inherited MCP tools. The most worth re-reading.
+
+Everything below is v2 work in progress. (v2 Phase A–D are also dated 2026-09-20 but live
+here, not in that day's archive.)
 
 | Date | What | Commits |
 |---|---|---|
