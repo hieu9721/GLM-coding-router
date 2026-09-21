@@ -26,8 +26,9 @@ Claude Code / Codex → shell command → glm-chat / glm-worker / glm-review →
 ```
 
 - `src/cli.ts` — main CLI entry (`glm-router`), built with commander. Each subcommand
-  (`init`, `doctor`, `status`, `key`, `config`, `delegate`, `benchmark`, `usage`, `mcp`, `project`,
-  `skill`, `uninstall`) lives in `src/commands/` and is wired here.
+  (`init`, `doctor`, `status`, `key`, `config`, `delegate`, `benchmark`, `usage`, `runs`,
+  `watch`, `dashboard`, `mcp`, `project`, `skill`, `uninstall`) lives in `src/commands/`
+  and is wired here.
 - `src/bin/{glm-chat,glm-fast,glm-worker,glm-review}.ts` — the four thin task binaries that
   resolve the Z.ai key, locate `claude.exe`, build the injected env, and spawn the child process.
   `glm-chat` is interactive; `glm-fast` is interactive pinned to the fast model; `glm-worker`
@@ -36,7 +37,11 @@ Claude Code / Codex → shell command → glm-chat / glm-worker / glm-review →
   `--tools Read,Glob,Grep`. All four accept `--profile <name>` (see `specs/glm-fast-profiles.md`).
 - `src/core/` — shared runtime: `config.ts` (zod-validated config), `paths.ts`, `zai-key.ts` (key
   resolution), `claude.ts` (`locateClaude`/`locateCodex` discovery), `env.ts` (`createGlmEnv`,
-  the child-only environment), `process.ts` (`spawnAgent`), `prompt.ts` (stdin/args resolution),
+  the child-only environment), `process.ts` (`spawnAgent`, plus `spawnAgentStream` for
+  piped/observed runs), `prompt.ts` (stdin/args resolution), `zai-quota.ts` (the Z.ai
+  monitor client shared by `usage`, the budget manager and `dashboard`),
+  `routing-flags.ts` (`--model main|fast` / `--force` / `--refresh-quota`, stripped from
+  argv before the prompt is read),
   `profile.ts` (`extractProfileFlag`/`applyProfile`), `git.ts` (`runGit`/`gitTopLevel` for
   delegate), `worktree.ts` (delegate worktree lifecycle, see `specs/delegate-worktrees.md`),
   `platform.ts` (`platformSupport`/`platformName`), `user-env.ts` (per-user secret store
@@ -55,6 +60,25 @@ Claude Code / Codex → shell command → glm-chat / glm-worker / glm-review →
 - `src/mcp/` — the glm-mcp MCP server (stdio JSON-RPC, tools built on core primitives only —
   never on the CLI commands, stdout is the protocol channel; specs/v1-architecture.md). Bin
   `src/bin/glm-mcp.ts` wires the readline loop; `glm-router mcp` registers it via `claude mcp add`.
+- `src/events/` — the v2 event model (specs/v2-architecture.md): `types.ts` (the canonical
+  `WorkerEvent` union, every event in a `{runId, taskId, provider, role, seq, ts}` envelope),
+  `bus.ts` (stamps envelopes, synchronous dispatch), `claude-adapter.ts` (Claude stream-json
+  → events; pure and never throws).
+- `src/runs/` — run identity and persistence: `ulid.ts` (`run_…` ids), `registry.ts`
+  (active + history, retention pruning), `store.ts` (`events.jsonl`/`summary.json`),
+  `heartbeat.ts`, `checkpoint.ts`, `drain.ts` (safe-boundary stop, gated on
+  `routing.handoffOnLowQuota`), `worker-run.ts` (the single orchestration path behind
+  `glm-worker` / `glm-review` / the MCP tools — preflight, spawn, record, handoff).
+- `src/budget/` — `manager.ts` (Z.ai quota snapshot + 60 s cache, fail-open) and
+  `estimator.ts` (task classification, p50/p90 from `cost-samples.jsonl` or the baseline).
+- `src/routing/glm-routing.ts` — `decideRoute`, the pure preflight decision: zone → model
+  preference, one-way downgrade, `wouldRefuse` (enforced as exit 41 only when
+  `routing.refuseOnCritical` is on).
+- `src/handoff/` — `bundle.ts` (the `handoff/` dir: checkpoint, `diff.patch`, `handoff.md`,
+  `handoff.json`; written whenever a run dies with work on disk) and `parent-handoff.ts`
+  (`HandoffResult` JSON on stdout, exit 41/42).
+- `src/tui/` — all ANSI behind `render.ts`; `progress.ts` is the stderr renderer
+  (`rich` on a TTY, `nested` `[GLM]` lines when piped, `off`).
 - `tests/{unit,integration,fixtures}` — integration tests exercise the real command surface
   against `tests/fixtures/fake-agent.mjs` standing in for `claude.exe`.
 
@@ -99,12 +123,12 @@ Integration tests spawn `tests/fixtures/fake-agent.mjs` through `node.exe` to ve
 
 **Other invariants**
 - Model names (`glm-5.3`, `glm-5.3-flash`) come from config (`%USERPROFILE%\.glm-coding-router\config.json` / `~/.glm-coding-router/config.json`, zod-validated) — never hardcode in multiple places.
-- Standard exit codes (spec §35, `src/core/errors.ts`): 10 key missing, 11 config invalid, 20 claude missing, 21 codex missing, 30 project root, 31 managed write, 40 child agent, 50 platform. Error messages use `ERROR [CODE]` format (`formatGlmError`) and are actionable.
+- Standard exit codes (spec §35, `src/core/errors.ts`): 10 key missing, 11 config invalid, 20 claude missing, 21 codex missing, 30 project root, 31 managed write, 40 child agent, 41 quota insufficient, 42 handoff required, 50 platform. Error messages use `ERROR [CODE]` format (`formatGlmError`) and are actionable. **41 and 42 are not crashes** (specs/v2-architecture.md, D2): both mean "unfinished, work preserved" and print a `HandoffResult` JSON on stdout — 41 is a preflight refusal that spawned nothing, 42 a mid-run handoff with a bundle. An orchestrator reads them as "continue in the same worktree", never as "the worker broke".
 - `glm-review` is read-only: `--tools Read,Glob,Grep` only. `glm-worker` uses `--tools`, never `--dangerously-skip-permissions` — and never `--permission-mode bypassPermissions`, which is the same thing renamed.
 - The worker's Bash access is an explicit allowlist (`worker.allowedBash`, `specs/worker-bash-permissions.md`): validation commands only, never git writes / `rm` / network / installs. `acceptEdits` alone denies **every** Bash call in headless mode, so the allowlist is what makes the tool usable — removing it silently disables validation.
 - The Z.ai key lives in the platform's own per-user store (`src/core/user-env.ts`): Windows User Environment, macOS keychain, or libsecret when `secret-tool` exists. Where there is none, the tool **prints guidance and never invents a file of its own** — the key is still never written anywhere this package owns.
 - Child processes inherit cwd/stdio, forward SIGINT (Ctrl+C must reach child claude), propagate exit code.
-- Prompt input priority: stdin (when not a TTY) → args → error (`src/core/prompt.ts`).
+- Prompt input priority: args → stdin (when not a TTY) → error (`src/core/prompt.ts`). Args are checked first and stdin is never awaited when they carry a prompt: stdin-first deadlocks whenever the pipe never reaches EOF, which is the normal shape under an agent harness or CI.
 - Claude binary discovery (`src/core/claude.ts`): `where.exe claude` → PATH search → config override → error. Don't assume `claude.cmd`; standalone installs expose `claude.exe`. Codex absence is a WARN, not fatal (Claude-only setups must work).
 
 ## Implementation order (spec §56)

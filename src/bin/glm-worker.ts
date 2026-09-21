@@ -7,9 +7,11 @@ import { Errors, formatGlmError, GlmRouterError } from "../core/errors.js";
 import { isMainModule } from "../core/main-guard.js";
 import { logger, redact } from "../core/logging.js";
 import { applyProfile, extractProfileFlag } from "../core/profile.js";
+import { extractRoutingFlags } from "../core/routing-flags.js";
 import { resolvePrompt } from "../core/prompt.js";
 import { spawnAgent } from "../core/process.js";
 import { resolveZaiApiKey } from "../core/zai-key.js";
+import { runInstrumented, shouldObserve } from "../runs/worker-run.js";
 
 /** Worker tool surface (spec §16). */
 export const WORKER_TOOLS = "Read,Glob,Grep,Edit,Write,Bash";
@@ -69,12 +71,15 @@ export function extractNoBashFlag(argv: readonly string[]): {
 
 /**
  * glm-worker (spec §15, §16): headless implementation worker.
- * Prompt priority: stdin → arguments → error. Never uses
+ * Prompt priority: arguments → stdin → error. Never uses
  * --dangerously-skip-permissions.
  */
 export async function runWorker(argv: readonly string[]): Promise<number> {
   const { rest: withoutProfile, profile } = extractProfileFlag(argv);
-  const { rest, noBash } = extractNoBashFlag(withoutProfile);
+  const { rest: withoutBashFlag, noBash } = extractNoBashFlag(withoutProfile);
+  // Phase E flags come off last, and before resolvePrompt: everything still in
+  // `rest` at that point becomes the prompt.
+  const { rest, model, force, refreshQuota } = extractRoutingFlags(withoutBashFlag);
   const prompt = await resolvePrompt(rest);
   const loaded = applyProfile(loadConfig(), profile);
   const config: RouterConfig = noBash
@@ -90,12 +95,33 @@ export async function runWorker(argv: readonly string[]): Promise<number> {
   const env = createGlmEnv(config, resolved.key);
   logger.debug(redact(`spawning ${claudePath} ${args.join(" ")}`, [resolved.key]));
 
-  return spawnAgent(claudePath, {
+  // v2 spec Phase D (C4): observe unless the caller opted out or already asked
+  // for a specific --output-format. The legacy path stays byte-identical.
+  if (!shouldObserve(args, process.env)) {
+    return spawnAgent(claudePath, {
+      args,
+      cwd: process.cwd(),
+      env,
+      interactive: false,
+    });
+  }
+  const observed = await runInstrumented({
+    kind: "worker",
+    prompt,
     args,
+    claudePath,
+    config,
+    secrets: [resolved.key],
     cwd: process.cwd(),
     env,
-    interactive: false,
+    // Phase E. The legacy path above never reaches here, so these flags apply
+    // to instrumented runs only — routing needs the event stream it observes.
+    zaiKey: resolved.key,
+    requestedModel: model,
+    force,
+    refreshQuota,
   });
+  return observed.code;
 }
 
 if (isMainModule(import.meta.url)) {

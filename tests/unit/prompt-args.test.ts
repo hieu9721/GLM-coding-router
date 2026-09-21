@@ -5,9 +5,24 @@ import { buildReviewArgs, REVIEW_TOOLS } from "../../src/bin/glm-review.js";
 import { buildWorkerArgs, extractNoBashFlag, WORKER_TOOLS } from "../../src/bin/glm-worker.js";
 import { defaultConfig } from "../../src/core/config.js";
 
-describe("resolvePrompt (spec §15, §40: stdin → args → error)", () => {
-  it("prefers stdin text over arguments", async () => {
-    const prompt = await resolvePrompt(["from", "args"], () => Promise.resolve("TASK:\nfrom stdin"));
+describe("resolvePrompt (spec §15, §40: args → stdin → error)", () => {
+  it("prefers arguments over stdin, and never awaits stdin when args carry a prompt", async () => {
+    // This assertion was inverted on 2026-09-20. Awaiting stdin first hangs
+    // forever when stdin is an open pipe that never reaches EOF — the normal
+    // shape under an agent harness or CI. A prompt in argv is explicit and
+    // must not wait on a stream that may never close.
+    let stdinRead = false;
+    const prompt = await resolvePrompt(["from", "args"], () => {
+      stdinRead = true;
+      // Never resolves: a pipe held open. The old order deadlocked here.
+      return new Promise<string>(() => {});
+    });
+    expect(prompt).toBe("from args");
+    expect(stdinRead, "stdin must not be touched when args carry a prompt").toBe(false);
+  });
+
+  it("still reads a piped packet when there are no arguments", async () => {
+    const prompt = await resolvePrompt([], () => Promise.resolve("TASK:\nfrom stdin"));
     expect(prompt).toBe("TASK:\nfrom stdin");
   });
 

@@ -85,6 +85,60 @@ export const ConfigSchema = z.object({
 
   // Named overlays selected via --profile (specs/glm-fast-profiles.md).
   profiles: z.record(z.string(), ProfileSchema).default({}),
+
+  // Run-history retention (specs/v2-architecture.md, Phase B / Config v2).
+  // The whole section is defaulted so every v1 config still validates.
+  history: z.object({
+    retentionDays: z.number().int().positive(),
+    maxRuns: z.number().int().positive(),
+  }).default({ retentionDays: 30, maxRuns: 1000 }),
+
+  // Progress renderer defaults (specs/v2-architecture.md, Phase C / Config v2).
+  // Defaulted exactly like `history` so every v1 config still validates and
+  // schemaVersion stays 1; `mode: "auto"` means rich on a TTY, nested otherwise.
+  ui: z.object({
+    mode: z.enum(["auto", "rich", "nested", "off"]),
+    color: z.boolean(),
+  }).default({ mode: "auto", color: true }),
+
+  // Quota-aware routing (specs/v2-architecture.md, Phase E / Config v2).
+  // Defaulted exactly like `history` so every v1 config still validates and
+  // schemaVersion stays 1.
+  routing: z.object({
+    quotaAware: z.boolean(),
+    refuseOnCritical: z.boolean(),
+    handoffOnLowQuota: z.boolean(),
+    reserveRatio: z.number().gt(0).lt(1),
+    safetyFactor: z.number().gte(1),
+    preferFlashBelow: z.number().gt(0).lt(1),
+    handoffReadyBelow: z.number().gt(0).lt(1),
+    criticalBelow: z.number().gt(0).lt(1),
+    pollIntervalSec: z.number().int().positive(),
+    quotaCacheTtlSec: z.number().int().positive(),
+  })
+    .refine(
+      (routing) =>
+        routing.criticalBelow < routing.handoffReadyBelow &&
+        routing.handoffReadyBelow < routing.preferFlashBelow,
+      { message: "routing zones must be ordered criticalBelow < handoffReadyBelow < preferFlashBelow" },
+    )
+    .default({
+      quotaAware: true,
+      // D3 (specs/v2-architecture.md, Decisions): refuseOnCritical and
+      // handoffOnLowQuota ship OFF in 2.0.0. Both act on an unmeasured cost
+      // baseline, and a wrong refusal/kill blocks real work behind a --force
+      // escape hatch; a wrong downgrade costs almost nothing. Observe and
+      // downgrade only until the routingAdvice evidence justifies flipping.
+      refuseOnCritical: false,
+      handoffOnLowQuota: false,
+      reserveRatio: 0.10,
+      safetyFactor: 1.3,
+      preferFlashBelow: 0.30,
+      handoffReadyBelow: 0.15,
+      criticalBelow: 0.08,
+      pollIntervalSec: 60,
+      quotaCacheTtlSec: 60,
+    }),
 });
 
 export type RouterConfig = z.infer<typeof ConfigSchema>;
@@ -108,6 +162,20 @@ export function defaultConfig(): RouterConfig {
       codexSkill: true,
     },
     profiles: {},
+    history: { retentionDays: 30, maxRuns: 1000 },
+    ui: { mode: "auto", color: true },
+    routing: {
+      quotaAware: true,
+      refuseOnCritical: false, // D3: observe in 2.0.0, refuse only on 2.1 evidence
+      handoffOnLowQuota: false, // D3: never kill a live child by default
+      reserveRatio: 0.10,
+      safetyFactor: 1.3,
+      preferFlashBelow: 0.30,
+      handoffReadyBelow: 0.15,
+      criticalBelow: 0.08,
+      pollIntervalSec: 60,
+      quotaCacheTtlSec: 60,
+    },
   };
 }
 

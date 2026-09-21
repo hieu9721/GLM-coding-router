@@ -87,8 +87,13 @@ src/tui/       render.ts  progress.ts  watch.ts  dashboard.ts  runs-view.ts
 src/commands/  runs.ts  watch.ts  dashboard.ts
 ```
 
+New core modules added while building: `src/core/zai-quota.ts` (the monitor-endpoint client
+moved out of `src/commands/usage.ts`, which four modules now share) and
+`src/core/routing-flags.ts` (`--model` / `--force` / `--refresh-quota`, stripped from argv
+before the prompt is read).
+
 Touched existing files: `src/core/config.ts` (v2 config sections), `src/core/paths.ts`
-(run dirs), `src/core/errors.ts` (2 new codes), `src/core/process.ts`
+(run dirs + quota cache + cost samples), `src/core/errors.ts` (2 new codes), `src/core/process.ts`
 (`spawnAgentStream`), `src/bin/glm-worker.ts` + `src/bin/glm-review.ts` (route through
 `worker-run.ts`), `src/mcp/server.ts` (registry on / renderer off), `src/cli.ts` (3 new
 commands), `src/templates/*` (teach orchestrators the handoff result), `package.json`
@@ -134,12 +139,18 @@ fiction for this stack. **Phase E's estimator ignores it; the quota delta stays 
 truth.** The *token* counts in `modelUsage` are real (they come from the API response) and
 may be used.
 
-**`src/events/types.ts`** — the canonical union (doc §4). Every event carries
-`{ runId, seq, ts }`; `seq` is assigned by the bus, monotonic per run.
+**`src/events/types.ts`** — the canonical union (doc §4). Every event carries the **H1**
+envelope `{ runId, taskId, provider, role, seq, ts }`; `seq` is assigned by the bus, monotonic
+per run, and `taskId` defaults to the `runId` while there is no task graph. `provider` is the
+canonical id `zai.zcode` (**H2**, settled by D5) — `"GLM"` is display text only and never
+reaches a persisted event. `role` is `"worker"` or `"reviewer"`.
+
+> The envelope is per-event and therefore also per-file in `events.jsonl`, which is the whole
+> point of H1: a v2-era history stays readable by v3/v4 without a migration pass.
 
 | Event | Payload beyond the envelope |
 |---|---|
-| `RunStarted` | `kind: "worker" \| "review" \| "delegate"`, `provider: "glm"`, `model`, `cwd`, `taskTitle`, `taskHash`, `parent: {type: "claude" \| "codex" \| "shell"}` |
+| `RunStarted` | `kind: "worker" \| "review" \| "delegate"` (which CLI surface — the vendor id lives in the envelope per H2), `model`, `cwd`, `taskTitle`, `taskHash`, `parent: {type: "claude" \| "codex" \| "shell"}` |
 | `AgentInitialized` | `sessionId`, `model`, `tools: string[]` |
 | `TurnStarted` | `turn: number` |
 | `ToolStarted` | `turn`, `toolUseId`, `tool`, `summary` (≤120 chars, redacted) |
@@ -156,8 +167,8 @@ may be used.
 | `RunCancelled` | `signal` |
 | `Heartbeat` | `state`, `turn` |
 
-**`src/events/bus.ts`** — ~40 lines: `createEventBus(runId)` with `emit(event)` (stamps
-`seq`/`ts`), `subscribe(fn)`, `close()`. Synchronous dispatch, subscriber exceptions are
+**`src/events/bus.ts`** — ~40 lines: `createEventBus(runId, { taskId?, role })` with
+`emit(event)` (stamps the whole H1 envelope), `subscribe(fn)`, `close()`. Synchronous dispatch, subscriber exceptions are
 caught and logged at debug level (a broken renderer must never kill a run).
 
 **`src/events/claude-adapter.ts`** — two exports:
@@ -175,7 +186,14 @@ Rules: **never throw** — an unrecognized `type`, a missing field, or invalid J
 zero events plus one debug log. `summary` derivation per tool: Read/Edit/Write → path made
 repo-relative; Bash → command, first line, truncated; Grep/Glob → pattern; anything else →
 tool name only. Every summary passes through `redact()` before it leaves the adapter.
-Validation detection: Bash command matches `/(npm|pnpm|yarn) (run )?(test|lint|typecheck)|vitest|jest|go test|pytest|cargo test|tsc\b/`.
+Validation detection: Bash command matches `/(npm|pnpm|yarn) (run )?(test|lint|typecheck)|vitest|jest|go test|pytest|cargo test|tsc\b|python3? (-m (pytest|unittest)\b|\S*test\S*\.py)/`.
+
+> The `python3` arm was added on 2026-09-20 when the adapter landed: A0's captured runs
+> validate with `python3 test_add.py`, which the original pattern missed, so **not one of
+> the three fixtures exercised the validation path** and the spec's own "a denied validation
+> is a real, reportable outcome" described something that could not happen. The allowlist in
+> `specs/worker-bash-permissions.md` already treats `python3 *` and `pytest*` as validation
+> commands; this makes the detector agree with it.
 
 **Prerequisite — `specs/worker-bash-permissions.md`.** A0 proved that on the published 1.0.0
 arguments *every* Bash call is denied (`system/permission_denied`, "This command requires
@@ -216,7 +234,11 @@ rebuilds a summary from events so `runs show` works for crashed runs.
 **`src/runs/heartbeat.ts`** — `startHeartbeat(runId, getState)` emits a `Heartbeat` event
 and refreshes `heartbeatAt` every 5 s (config-free constant). A reader treats an active run
 as **orphaned** when `heartbeatAt` is older than 30 s *and* `process.kill(pid, 0)` throws;
-`runs clean` moves orphans to history with `status: "orphaned"`.
+`runs clean` moves orphans to history with **state `FAILED`** and a summary rebuilt from
+`events.jsonl`. (This said `status: "orphaned"` until Phase G was built: `RunState` uses
+v4 §21's names per hedge H6 and has no `orphaned` member, and inventing one would have
+undone that hedge for a single bookkeeping case. "Orphaned" stays a *detection* result
+(`isOrphaned`) and a dashboard marker, not a persisted state.)
 
 **C3 enforcement (test it, don't assume it):** what goes on disk is the metadata above plus
 canonical events. `taskTitle` = first line of the prompt, ≤120 chars, redacted;
@@ -303,7 +325,7 @@ map correctly, and the legacy path is chosen when `--output-format` is passed.
 
 ```ts
 interface BudgetSnapshot {
-  provider: "glm";
+  provider: "zai.zcode";   // canonical id (H2/D5) — "GLM" is display text only
   fiveHour: BudgetWindow;   // { used, limit, remaining, remainingRatio, resetAt }
   weekly:  BudgetWindow;
   confidence: "exact" | "cached" | "unknown";
@@ -311,7 +333,15 @@ interface BudgetSnapshot {
 }
 ```
 
-Mapping: `unit 3` → `fiveHour`, `unit 6 & number 1` → `weekly` (specs/usage.md).
+Mapping: `unit 3` → `fiveHour`, `unit 6 & number 1` → `weekly` (specs/usage.md). **A payload
+that carries neither window — or only one of them — is `confidence: "unknown"`, never an
+"exact" snapshot of zeros.** Found in review when Phase E landed: `usage.ts` already renders
+"(no quota windows reported)", so this is a real state of the endpoint, and mapped naively it
+produces zero windows that `zoneFor`'s `min()` reads as CRITICAL — throttling every run today
+and refusing every run once `refuseOnCritical` flips. Fail-open has to survive a 200 response
+that says nothing. `fetchZaiQuota` itself now lives in **`src/core/zai-quota.ts`**, not in
+`src/commands/usage.ts`: four readers share it and a budget module must never import a
+command module.
 Cached in `<configDir>/cache/quota.json` with a 60 s TTL so a burst of runs makes one
 request; `--refresh-quota` bypasses it. **Fail-open:** endpoint down / malformed / no key →
 `confidence: "unknown"`, and every downstream decision degrades to "run normally, warn
@@ -323,7 +353,10 @@ once on stderr". A monitoring outage must never block work.
 **`src/budget/estimator.ts`** (doc §13):
 
 - `classifyTask(prompt)` → `"explore" | "crud" | "tests" | "docs" | "refactor" | "bugfix" | "other"`,
-  a deterministic keyword classifier (unit-tested table, not a model call).
+  a deterministic keyword classifier (unit-tested table, not a model call). Matching is on
+  **whole words**, with the word forms listed explicitly: a substring table reads "docker" as
+  docs and "fixture" as bugfix, and the kind picks the cost row behind `wouldRefuse` — the
+  very evidence D3 says 2.1 will be argued from, so noise here becomes a wrong answer later.
 - Samples live in `<configDir>/cost-samples.jsonl`:
   `{ ts, taskKind, model, repo, credits, turns, tokensIn, tokensOut }`.
 - A sample is recorded at run end **only when the measurement is clean**: quota snapshot
@@ -338,16 +371,30 @@ once on stderr". A monitoring outage must never block work.
 **`src/routing/glm-routing.ts`** — one pure function, the heart of the phase:
 
 ```ts
-decideRoute({ snapshot, estimate, config, requestedModel, force })
+decideRoute({ snapshot, estimates: { main, fast }, config, requestedModel, force })
   → { action: "run" | "downgrade" | "return_to_parent",
       model, zone, reason, usableBudget, estimatedCost,
       wouldRefuse: boolean }   // the refusal the router *would* have made
 ```
 
-- `reserve = reserveRatio × limit`; `usableBudget = remaining − reserve` (doc §11).
+> **Corrected when Phase E landed:** this signature said `estimate` (singular) while the
+> refusal rule below needs *both* models' p90. One estimate cannot express that, and
+> deriving the fast one by scaling main would bake the estimator's baseline ratio into the
+> router, so the pair is passed in and the caller computes each with `estimateCost`.
+
+- `reserve = reserveRatio × limit`; `usableBudget = max(0, remaining − reserve)` (doc §11),
+  computed on the **binding window** — whichever of `fiveHour`/`weekly` has the lower
+  `remainingRatio`, i.e. the one `zoneFor`'s `min()` already picked, so the credits and the
+  zone can never be computed against two different windows.
 - `wouldRefuse = true` when `estimate.p90 × safetyFactor > usableBudget` for **both** main
   and fast (doc §14: always try Flash before giving up), or when the zone is CRITICAL.
-- Zone → model preference (doc §12): HEALTHY → main; CONSERVE / HANDOFF_READY → fast.
+- Zone → model preference (doc §12): HEALTHY → main; CONSERVE / HANDOFF_READY / **CRITICAL**
+  → fast. (CRITICAL was missing from the original table; with D3's default a CRITICAL run
+  still executes, and a nearly-empty quota should run cheap.)
+- **Affordability fallback, one-way.** When the unpinned choice is main, main does not fit and
+  fast does, the route downgrades to fast. Without it the router contradicts itself: it
+  reports "affordable" *because Flash fits* and then runs main, which does not. There is no
+  fast → main upgrade — below HEALTHY it is the zone, not the estimate, that protects quota.
 - **`wouldRefuse` becomes `action: "return_to_parent"` only when
   `routing.refuseOnCritical` is true — which is NOT the default in 2.0.0 (D3).** With the
   default, the router logs a `BudgetWarning`, prints one stderr line, and runs anyway on the
@@ -363,6 +410,23 @@ which v0.5 verified live before anything was designed on top of it. A baseline t
 high turns into refusals of runs the quota could actually have afforded, and the user only
 finds out by discovering `--force`. Downgrading to Flash carries no such risk, so it stays
 on; refusing does not.
+
+**First real measurement, 2026-09-21 — D3 was right, by a factor of 31.** The first live run
+through the finished preflight (`glm-worker "Reply exactly with PHASE_E_OK"`, weekly window at
+20 % → zone CONSERVE → correctly downgraded to Flash, stdout byte-exactly `PHASE_E_OK`) recorded:
+
+```json
+"routingAdvice": { "zone": "CONSERVE", "wouldRefuse": false,
+                   "estimatedCost": 31.2, "usableBudget": 967, "actualCredits": 1 }
+```
+
+**Estimated 31.2 credits; it cost 1.** One data point is not a distribution, but it is the
+first time the baseline table has been checked against reality on this stack, and it reads
+~31× high for a trivial task. With `refuseOnCritical: true` a table this pessimistic refuses
+work that costs a single credit, and the user meets `--force` instead of an explanation —
+exactly the failure D3 predicted. **Do not flip the default on fewer than the "few weeks" of
+`routingAdvice` this file already promises**, and when flipping, re-derive the baseline from
+`cost-samples.jsonl` rather than keeping doc §13's numbers.
 
 **Evidence for flipping the default in 2.1 — build it now, it is nearly free.** Every
 `summary.json` records `routingAdvice: { wouldRefuse, estimatedCost, usableBudget, zone,
@@ -596,45 +660,45 @@ not three.
 
 Doc §23's checklist, each mapped to how it is proven:
 
-- [ ] **Run ID** — `glm-worker` prints `run_…` in the header; `runs` lists it; `events.jsonl`
-      exists for it. *(integration: worker-run)*
-- [ ] **Realtime progress** — turns and tools appear on stderr while the child is alive
+- [x] **Run ID** — `glm-worker` prints the id suffix in the header; `runs` lists the full
+      `run_…` id; `events.jsonl` exists for it. *(integration: worker-run)*
+- [x] **Realtime progress** — turns and tools appear on stderr while the child is alive
       (fake agent with `GLM_TEST_STREAM_DELAY_MS=50`), not only at exit. *(integration)*
-- [ ] **Dashboard works** — quota + active + recent render; non-TTY snapshot mode.
-- [ ] **Watch attaches to an active run** — events appended after attach are rendered.
-- [ ] **Run history exists** — `summary.json` + `events.jsonl` per run under
+- [x] **Dashboard works** — quota + active + recent render; non-TTY snapshot mode.
+- [x] **Watch attaches to an active run** — events appended after attach are rendered.
+- [x] **Run history exists** — `summary.json` + `events.jsonl` per run under
       `history/YYYY-MM-DD/`; retention prunes.
-- [ ] **Quota realtime** — dashboard/preflight read the live monitor endpoint (cached ≤60 s);
+- [x] **Quota realtime** — dashboard/preflight read the live monitor endpoint (cached ≤60 s);
       a real run against the real endpoint is part of release verification.
-- [ ] **Main → Flash routing** — CONSERVE zone spawns the child with `models.fast` in
+- [x] **Main → Flash routing** — CONSERVE zone spawns the child with `models.fast` in
       `ANTHROPIC_DEFAULT_*` (asserted via the fake agent's env dump).
-- [ ] **Preflight blocks an unaffordable run** — with `refuseOnCritical: true`: exit 41,
+- [x] **Preflight blocks an unaffordable run** — with `refuseOnCritical: true`: exit 41,
       handoff JSON on stdout, no child spawned, no repo writes.
-- [ ] **Active run checkpoints** — `checkpoint.json` reflects completed/pending/files.
-- [ ] **Quota-low run hands off to the parent** — with `handoffOnLowQuota: true`: exit 42,
+- [x] **Active run checkpoints** — `checkpoint.json` reflects completed/pending/files.
+- [x] **Quota-low run hands off to the parent** — with `handoffOnLowQuota: true`: exit 42,
       bundle with `handoff.md` + `handoff.json` + `diff.patch`, stop occurred on a safe
       boundary.
-- [ ] **Shipped defaults never refuse and never kill (D3)** — with the 2.0.0 config, an
+- [x] **Shipped defaults never refuse and never kill (D3)** — with the 2.0.0 config, an
       injected CRITICAL quota still spawns the child, exits 0, warns once on stderr, and
       records `routingAdvice.wouldRefuse: true` in `summary.json`.
-- [ ] **No working-tree changes lost** — proven twice: the drain test (switch on) asserts
+- [x] **No working-tree changes lost** — proven twice: the drain test (switch on) asserts
       the fake agent's edits survive and appear in `diff.patch`; the **bundle-on-death**
       test (all switches off, child exits non-zero after a `FileChanged`) asserts the
       bundle is written anyway, exit stays 40, and the edits are on disk.
-- [ ] **stdout compatibility (C1)** — `glm-worker "Reply exactly with V2_OK"` prints exactly
+- [x] **stdout compatibility (C1)** — `glm-worker "Reply exactly with V2_OK"` prints exactly
       `V2_OK`; `benchmark` still parses its JSON.
-- [ ] **MCP stdout clean (C2)** — full tool-call suite over real stdio; every stdout byte is
+- [x] **MCP stdout clean (C2)** — full tool-call suite over real stdio; every stdout byte is
       a valid JSON-RPC frame; stderr may carry anything.
-- [ ] **v1 backward compatible (C4)** — the entire v1.0 test suite passes unmodified; the
+- [x] **v1 backward compatible (C4)** — the entire v1.0 test suite passes unmodified; the
       v1 exit codes still fire for the v1 situations.
-- [ ] **Denied tools are reported, not swallowed** — replaying `edit.ndjson` yields two
+- [x] **Denied tools are reported, not swallowed** — replaying `edit.ndjson` yields two
       `ToolDenied` events and a summary that names the blocked commands.
-- [ ] **`thinking_tokens` never floods the store** — replaying `edit.ndjson` (94 of 111 lines
+- [x] **`thinking_tokens` never floods the store** — replaying `edit.ndjson` (94 of 111 lines
       are counters) writes no more than a handful of liveness events to `events.jsonl`, and
       no `thinking` block text appears anywhere on disk.
-- [ ] **No secret / prompt / source leaks (C3)** — a planted fake key and a distinctive
+- [x] **No secret / prompt / source leaks (C3)** — a planted fake key and a distinctive
       prompt body appear in no file under `<configDir>/runs/` and in no rendered output.
-- [ ] `npm run build`, `npm test`, `npm run lint` green; README + AGENTS.md + MEMORY.md
+- [x] `npm run build`, `npm test`, `npm run lint` green; README + AGENTS.md + MEMORY.md
       updated; version 2.0.0.
 
 ## Risks
