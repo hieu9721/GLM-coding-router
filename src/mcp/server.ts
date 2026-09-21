@@ -19,7 +19,8 @@ import {
 } from "../core/worktree.js";
 import { resolveZaiApiKey } from "../core/zai-key.js";
 import { runInstrumented, shouldObserve } from "../runs/worker-run.js";
-import { aggregateLocalUsage, describeWindow, fetchZaiQuota } from "../commands/usage.js";
+import { aggregateLocalUsage } from "../commands/usage.js";
+import { describeWindow, fetchZaiQuota } from "../core/zai-quota.js";
 
 /**
  * glm-mcp (specs/v1-architecture.md): the router exposed as MCP tools over

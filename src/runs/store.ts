@@ -45,6 +45,22 @@ export interface RunSummary {
   /** Count of `ApiRetry` events, a signal the endpoint was struggling. */
   readonly retries: number;
   readonly validation: ValidationOutcome;
+  /**
+   * What preflight would have done, recorded whether or not it was enforced
+   * (Phase E, decision D3). This is the evidence 2.1's "flip refuseOnCritical
+   * to true?" question is answered from: a `wouldRefuse: true` next to the
+   * `actualCredits` that run really consumed says directly how often the
+   * refusal would have been wrong. Absent on runs that were never routed
+   * (preflight unavailable, or a v1-path run), and `actualCredits` is null
+   * when the measurement was not clean enough to attribute.
+   */
+  readonly routingAdvice?: {
+    readonly wouldRefuse: boolean;
+    readonly estimatedCost: number;
+    readonly usableBudget: number;
+    readonly zone: string;
+    readonly actualCredits: number | null;
+  };
 }
 
 export interface RunStore {

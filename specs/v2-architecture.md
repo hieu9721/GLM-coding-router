@@ -87,8 +87,13 @@ src/tui/       render.ts  progress.ts  watch.ts  dashboard.ts  runs-view.ts
 src/commands/  runs.ts  watch.ts  dashboard.ts
 ```
 
+New core modules added while building: `src/core/zai-quota.ts` (the monitor-endpoint client
+moved out of `src/commands/usage.ts`, which four modules now share) and
+`src/core/routing-flags.ts` (`--model` / `--force` / `--refresh-quota`, stripped from argv
+before the prompt is read).
+
 Touched existing files: `src/core/config.ts` (v2 config sections), `src/core/paths.ts`
-(run dirs), `src/core/errors.ts` (2 new codes), `src/core/process.ts`
+(run dirs + quota cache + cost samples), `src/core/errors.ts` (2 new codes), `src/core/process.ts`
 (`spawnAgentStream`), `src/bin/glm-worker.ts` + `src/bin/glm-review.ts` (route through
 `worker-run.ts`), `src/mcp/server.ts` (registry on / renderer off), `src/cli.ts` (3 new
 commands), `src/templates/*` (teach orchestrators the handoff result), `package.json`
@@ -328,7 +333,15 @@ interface BudgetSnapshot {
 }
 ```
 
-Mapping: `unit 3` → `fiveHour`, `unit 6 & number 1` → `weekly` (specs/usage.md).
+Mapping: `unit 3` → `fiveHour`, `unit 6 & number 1` → `weekly` (specs/usage.md). **A payload
+that carries neither window — or only one of them — is `confidence: "unknown"`, never an
+"exact" snapshot of zeros.** Found in review when Phase E landed: `usage.ts` already renders
+"(no quota windows reported)", so this is a real state of the endpoint, and mapped naively it
+produces zero windows that `zoneFor`'s `min()` reads as CRITICAL — throttling every run today
+and refusing every run once `refuseOnCritical` flips. Fail-open has to survive a 200 response
+that says nothing. `fetchZaiQuota` itself now lives in **`src/core/zai-quota.ts`**, not in
+`src/commands/usage.ts`: four readers share it and a budget module must never import a
+command module.
 Cached in `<configDir>/cache/quota.json` with a 60 s TTL so a burst of runs makes one
 request; `--refresh-quota` bypasses it. **Fail-open:** endpoint down / malformed / no key →
 `confidence: "unknown"`, and every downstream decision degrades to "run normally, warn
@@ -340,7 +353,10 @@ once on stderr". A monitoring outage must never block work.
 **`src/budget/estimator.ts`** (doc §13):
 
 - `classifyTask(prompt)` → `"explore" | "crud" | "tests" | "docs" | "refactor" | "bugfix" | "other"`,
-  a deterministic keyword classifier (unit-tested table, not a model call).
+  a deterministic keyword classifier (unit-tested table, not a model call). Matching is on
+  **whole words**, with the word forms listed explicitly: a substring table reads "docker" as
+  docs and "fixture" as bugfix, and the kind picks the cost row behind `wouldRefuse` — the
+  very evidence D3 says 2.1 will be argued from, so noise here becomes a wrong answer later.
 - Samples live in `<configDir>/cost-samples.jsonl`:
   `{ ts, taskKind, model, repo, credits, turns, tokensIn, tokensOut }`.
 - A sample is recorded at run end **only when the measurement is clean**: quota snapshot
@@ -355,16 +371,30 @@ once on stderr". A monitoring outage must never block work.
 **`src/routing/glm-routing.ts`** — one pure function, the heart of the phase:
 
 ```ts
-decideRoute({ snapshot, estimate, config, requestedModel, force })
+decideRoute({ snapshot, estimates: { main, fast }, config, requestedModel, force })
   → { action: "run" | "downgrade" | "return_to_parent",
       model, zone, reason, usableBudget, estimatedCost,
       wouldRefuse: boolean }   // the refusal the router *would* have made
 ```
 
-- `reserve = reserveRatio × limit`; `usableBudget = remaining − reserve` (doc §11).
+> **Corrected when Phase E landed:** this signature said `estimate` (singular) while the
+> refusal rule below needs *both* models' p90. One estimate cannot express that, and
+> deriving the fast one by scaling main would bake the estimator's baseline ratio into the
+> router, so the pair is passed in and the caller computes each with `estimateCost`.
+
+- `reserve = reserveRatio × limit`; `usableBudget = max(0, remaining − reserve)` (doc §11),
+  computed on the **binding window** — whichever of `fiveHour`/`weekly` has the lower
+  `remainingRatio`, i.e. the one `zoneFor`'s `min()` already picked, so the credits and the
+  zone can never be computed against two different windows.
 - `wouldRefuse = true` when `estimate.p90 × safetyFactor > usableBudget` for **both** main
   and fast (doc §14: always try Flash before giving up), or when the zone is CRITICAL.
-- Zone → model preference (doc §12): HEALTHY → main; CONSERVE / HANDOFF_READY → fast.
+- Zone → model preference (doc §12): HEALTHY → main; CONSERVE / HANDOFF_READY / **CRITICAL**
+  → fast. (CRITICAL was missing from the original table; with D3's default a CRITICAL run
+  still executes, and a nearly-empty quota should run cheap.)
+- **Affordability fallback, one-way.** When the unpinned choice is main, main does not fit and
+  fast does, the route downgrades to fast. Without it the router contradicts itself: it
+  reports "affordable" *because Flash fits* and then runs main, which does not. There is no
+  fast → main upgrade — below HEALTHY it is the zone, not the estimate, that protects quota.
 - **`wouldRefuse` becomes `action: "return_to_parent"` only when
   `routing.refuseOnCritical` is true — which is NOT the default in 2.0.0 (D3).** With the
   default, the router logs a `BudgetWarning`, prints one stderr line, and runs anyway on the
@@ -380,6 +410,23 @@ which v0.5 verified live before anything was designed on top of it. A baseline t
 high turns into refusals of runs the quota could actually have afforded, and the user only
 finds out by discovering `--force`. Downgrading to Flash carries no such risk, so it stays
 on; refusing does not.
+
+**First real measurement, 2026-09-21 — D3 was right, by a factor of 31.** The first live run
+through the finished preflight (`glm-worker "Reply exactly with PHASE_E_OK"`, weekly window at
+20 % → zone CONSERVE → correctly downgraded to Flash, stdout byte-exactly `PHASE_E_OK`) recorded:
+
+```json
+"routingAdvice": { "zone": "CONSERVE", "wouldRefuse": false,
+                   "estimatedCost": 31.2, "usableBudget": 967, "actualCredits": 1 }
+```
+
+**Estimated 31.2 credits; it cost 1.** One data point is not a distribution, but it is the
+first time the baseline table has been checked against reality on this stack, and it reads
+~31× high for a trivial task. With `refuseOnCritical: true` a table this pessimistic refuses
+work that costs a single credit, and the user meets `--force` instead of an explanation —
+exactly the failure D3 predicted. **Do not flip the default on fewer than the "few weeks" of
+`routingAdvice` this file already promises**, and when flipping, re-derive the baseline from
+`cost-samples.jsonl` rather than keeping doc §13's numbers.
 
 **Evidence for flipping the default in 2.1 — build it now, it is nearly free.** Every
 `summary.json` records `routingAdvice: { wouldRefuse, estimatedCost, usableBudget, zone,

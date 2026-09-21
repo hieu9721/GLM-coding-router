@@ -24,6 +24,8 @@ export const ExitCode = {
   ProjectRootNotFound: 30,
   ManagedFileWriteFailed: 31,
   ChildAgentFailed: 40,
+  QuotaInsufficient: 41,
+  HandoffRequired: 42,
   UnsupportedPlatform: 50,
 } as const;
 
@@ -132,6 +134,33 @@ export const Errors = {
       name: "CHILD_AGENT_FAILED",
       message: `The child agent process failed: ${cause}`,
       exitCode: ExitCode.ChildAgentFailed,
+    }),
+
+  // 41 and 42 (specs/v2-architecture.md Phase E/F, decision D2) both mean
+  // "unfinished, work preserved" — orchestrators read them as a handoff, not
+  // a crash, which is why their hints point at resuming rather than retrying.
+
+  quotaInsufficient: (estimatedCost: number, usableBudget: number): GlmRouterError =>
+    new GlmRouterError({
+      name: "QUOTA_INSUFFICIENT",
+      // Both numbers are plan credits (H7), never currency.
+      message: `Estimated cost ${estimatedCost} credits does not fit the usable budget of ${usableBudget} credits.`,
+      // 41 is the preflight refusal: nothing was spawned yet, so the only
+      // moves are wait for a reset or explicitly accept the risk.
+      hint: ["Wait for the quota window to reset, or re-run with --force to run anyway."],
+      exitCode: ExitCode.QuotaInsufficient,
+    }),
+
+  handoffRequired: (reason: string, bundlePath?: string): GlmRouterError =>
+    new GlmRouterError({
+      name: "HANDOFF_REQUIRED",
+      message: `The run stopped unfinished: ${reason}.`,
+      // 42 is the mid-run handoff: the work is never lost, only moved.
+      hint: [
+        "The work is unfinished but preserved.",
+        ...(bundlePath !== undefined ? [`Pick it up from: ${bundlePath}`] : []),
+      ],
+      exitCode: ExitCode.HandoffRequired,
     }),
 
   unsupportedPlatform: (platform: string): GlmRouterError =>

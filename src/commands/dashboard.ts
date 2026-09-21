@@ -9,8 +9,8 @@ import type { ResolvedZaiKey } from "../core/zai-key.js";
 import { isOrphaned, listActive, listHistory, type RunSummaryRef } from "../runs/registry.js";
 import { readEvents } from "../runs/store.js";
 import { ansi, createWriter, paint, type Style, type Writer } from "../tui/render.js";
-import { describeWindow, fetchZaiQuota } from "./usage.js";
-import type { ZaiLimit } from "./usage.js";
+import { describeWindow, fetchZaiQuota } from "../core/zai-quota.js";
+import type { ZaiLimit } from "../core/zai-quota.js";
 import { emitJson, type GlobalOptions } from "./context.js";
 
 // Display-only zone thresholds for the dashboard's one-word verdict. Phase E

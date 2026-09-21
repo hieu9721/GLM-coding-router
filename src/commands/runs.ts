@@ -63,6 +63,13 @@ interface RunRow {
   readonly turns: number | null;
   readonly files: number | null;
   readonly cwd: string | null;
+  /**
+   * Carried in `--json` only — it has no table column, but it is the reason
+   * the spec's own validation step reads this command:
+   * `runs --json | jq '[.[] | select(.routingAdvice.wouldRefuse)] | length'`
+   * is how 2.1 decides whether refuseOnCritical can be flipped on (D3).
+   */
+  readonly routingAdvice: RunSummary["routingAdvice"] | null;
 }
 
 const TABLE_HEADERS = ["id", "state", "kind", "model", "started", "duration", "turns", "files", "cwd"];
@@ -119,6 +126,7 @@ function historyRows(home: string, limit: number): RunRow[] {
         durationMs: ref.summary?.durationMs ?? null,
         turns: ref.summary?.turns ?? null,
         files: ref.summary?.filesChanged.length ?? null,
+        routingAdvice: ref.summary?.routingAdvice ?? null,
         cwd: start.cwd,
       };
     });
@@ -144,6 +152,7 @@ function activeRows(home: string, now: () => Date, limit: number): RunRow[] {
         durationMs: elapsedSince(run.startedAt, now),
         turns: progress?.turns ?? null,
         files: progress?.filesChanged.length ?? null,
+        routingAdvice: null, // a live run has no summary yet
         cwd: run.cwd,
       };
     });

@@ -7,6 +7,7 @@ import { Errors, formatGlmError, GlmRouterError } from "../core/errors.js";
 import { isMainModule } from "../core/main-guard.js";
 import { logger, redact } from "../core/logging.js";
 import { applyProfile, extractProfileFlag } from "../core/profile.js";
+import { extractRoutingFlags } from "../core/routing-flags.js";
 import { resolvePrompt } from "../core/prompt.js";
 import { spawnAgent } from "../core/process.js";
 import { resolveZaiApiKey } from "../core/zai-key.js";
@@ -75,7 +76,10 @@ export function extractNoBashFlag(argv: readonly string[]): {
  */
 export async function runWorker(argv: readonly string[]): Promise<number> {
   const { rest: withoutProfile, profile } = extractProfileFlag(argv);
-  const { rest, noBash } = extractNoBashFlag(withoutProfile);
+  const { rest: withoutBashFlag, noBash } = extractNoBashFlag(withoutProfile);
+  // Phase E flags come off last, and before resolvePrompt: everything still in
+  // `rest` at that point becomes the prompt.
+  const { rest, model, force, refreshQuota } = extractRoutingFlags(withoutBashFlag);
   const prompt = await resolvePrompt(rest);
   const loaded = applyProfile(loadConfig(), profile);
   const config: RouterConfig = noBash
@@ -110,6 +114,12 @@ export async function runWorker(argv: readonly string[]): Promise<number> {
     secrets: [resolved.key],
     cwd: process.cwd(),
     env,
+    // Phase E. The legacy path above never reaches here, so these flags apply
+    // to instrumented runs only — routing needs the event stream it observes.
+    zaiKey: resolved.key,
+    requestedModel: model,
+    force,
+    refreshQuota,
   });
   return observed.code;
 }

@@ -43,3 +43,13 @@ export function runDir(home: string = os.homedir(), date: string, id: string): s
 export function activeRunFile(home: string = os.homedir(), id: string): string {
   return path.join(activeRunsDir(home), `${id}.json`);
 }
+
+/** Cached quota snapshot (specs/v2-architecture.md, Phase E) — a cache, never truth. */
+export function quotaCachePath(home: string = os.homedir()): string {
+  return path.join(configDir(home), "cache", "quota.json");
+}
+
+/** Cost-history samples, one JSON line per cleanly measured run (doc §13, Phase E). */
+export function costSamplesPath(home: string = os.homedir()): string {
+  return path.join(configDir(home), "cost-samples.jsonl");
+}

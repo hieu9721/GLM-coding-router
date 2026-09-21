@@ -7,6 +7,7 @@ import { Errors, formatGlmError, GlmRouterError } from "../core/errors.js";
 import { isMainModule } from "../core/main-guard.js";
 import { logger, redact } from "../core/logging.js";
 import { applyProfile, extractProfileFlag } from "../core/profile.js";
+import { extractRoutingFlags } from "../core/routing-flags.js";
 import { readStdin, resolvePrompt } from "../core/prompt.js";
 import { spawnAgent } from "../core/process.js";
 import { resolveZaiApiKey } from "../core/zai-key.js";
@@ -40,7 +41,10 @@ export function buildReviewArgs(prompt: string, config: RouterConfig): string[] 
  * discovery, duplicate detection, dependency inspection, and review.
  */
 export async function runReview(argv: readonly string[]): Promise<number> {
-  const { rest, profile } = extractProfileFlag(argv);
+  const { rest: withoutProfile, profile } = extractProfileFlag(argv);
+  // Phase E flags come off before resolvePrompt: whatever is still in
+  // `rest` at that point becomes the prompt.
+  const { rest, model, force, refreshQuota } = extractRoutingFlags(withoutProfile);
   const prompt = await resolvePrompt(rest, readStdin, "glm-review");
   const config = applyProfile(loadConfig(), profile);
   const resolved = resolveZaiApiKey();
@@ -72,6 +76,11 @@ export async function runReview(argv: readonly string[]): Promise<number> {
     secrets: [resolved.key],
     cwd: process.cwd(),
     env,
+    // Phase E; instrumented runs only, same as glm-worker.
+    zaiKey: resolved.key,
+    requestedModel: model,
+    force,
+    refreshQuota,
   });
   return observed.code;
 }

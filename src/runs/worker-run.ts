@@ -1,20 +1,27 @@
 import os from "node:os";
+import path from "node:path";
 import type { RouterConfig } from "../core/config.js";
-import { ExitCode, formatGlmError, GlmRouterError } from "../core/errors.js";
+import { Errors, ExitCode, formatGlmError, GlmRouterError } from "../core/errors.js";
 import { logger } from "../core/logging.js";
 import { runDir } from "../core/paths.js";
 import { spawnAgentStream } from "../core/process.js";
+import { fetchBudget } from "../budget/manager.js";
+import type { BudgetSnapshot } from "../budget/manager.js";
+import { classifyTask, estimateCost, isCleanMeasurement, recordSample } from "../budget/estimator.js";
+import type { TaskKind } from "../budget/estimator.js";
+import { decideRoute } from "../routing/glm-routing.js";
+import type { RouteDecision } from "../routing/glm-routing.js";
 import { createEventBus } from "../events/bus.js";
 import type { EventInput } from "../events/bus.js";
 import type { AgentRole, WorkerEvent } from "../events/types.js";
 import { createStreamAdapter } from "../events/claude-adapter.js";
 import { attachProgress, resolveProgressMode } from "../tui/progress.js";
 import type { ProgressMode } from "../tui/progress.js";
-import { createRun, finishRun, pruneHistory, taskHashOf, taskTitleOf } from "./registry.js";
+import { createRun, finishRun, listActive, pruneHistory, taskHashOf, taskTitleOf } from "./registry.js";
 import { startHeartbeat } from "./heartbeat.js";
 import type { HeartbeatHandle } from "./heartbeat.js";
 import { openRunStore, summarize } from "./store.js";
-import type { RunStore } from "./store.js";
+import type { RunStore, RunSummary } from "./store.js";
 import { runId } from "./ulid.js";
 
 /**
@@ -63,6 +70,34 @@ export interface WorkerRunOptions {
   readonly now?: () => Date;
   /** Injectable so tests can observe (or fake) the spawn without a child. */
   readonly spawnImpl?: typeof spawnAgentStream;
+
+  // --- Preflight routing (specs/v2-architecture.md, Phase E) ---
+  /**
+   * The Z.ai key the quota probe uses. Defaults to the first entry of
+   * `secrets`, which is what every current caller passes — an explicit seam
+   * exists so the probe never depends on the ORDER of a list whose actual job
+   * is redaction. A wrong or missing key only costs confidence "unknown",
+   * which fails open.
+   */
+  readonly zaiKey?: string;
+  /** The --model pin. Pins the model; does NOT bypass an enforced refusal. */
+  readonly requestedModel?: "main" | "fast";
+  /** The --force flag: bypasses an enforced refusal. */
+  readonly force?: boolean;
+  /** The --refresh-quota flag: bypasses the 60 s quota cache for the preflight read. */
+  readonly refreshQuota?: boolean;
+  /**
+   * Injectable budget source. Tests pass a fixed snapshot so an "injected low
+   * quota" never needs the network; production uses the cached `fetchBudget`.
+   */
+  readonly budgetSource?: (input: {
+    readonly home: string;
+    readonly key?: string;
+    readonly refresh?: boolean;
+    readonly ttlSec?: number;
+  }) => Promise<BudgetSnapshot>;
+  /** How many runs are active besides none — injectable so the sample rule is testable. */
+  readonly activeRunCount?: () => number;
 }
 
 export interface WorkerRunResult {
@@ -143,6 +178,27 @@ export async function runInstrumented(options: WorkerRunOptions): Promise<Worker
   const taskTitle = taskTitleOf(options.prompt, options.secrets);
   const taskHash = taskHashOf(options.prompt);
 
+  // Preflight (Phase E). Never throws: any failure degrades to "run on the
+  // main model", which is exactly what v1 did, so quota trouble can never be
+  // worse than not having quota awareness at all.
+  const preflight = await runPreflight(options, home);
+  if (preflight.decision?.action === "return_to_parent") {
+    // Exit 41. Nothing is spawned and nothing is written — not to the repo and
+    // not to the run history, because a run that never started has no events
+    // to show. The HandoffResult on stdout IS the record (D2): a parent agent
+    // reads it instead of parsing prose. This arm is unreachable with the
+    // shipped 2.0.0 config, where refuseOnCritical is false (D3).
+    writeRefusal(stdout, stderr, preflight.decision, id, taskTitle);
+    return { code: ExitCode.QuotaInsufficient, runId: id, runDir: dir };
+  }
+  // The model the run ACTUALLY uses: a zone-driven downgrade has to reach the
+  // child, and the child reads it from the env, not from our config object.
+  const model = preflight.decision?.model ?? options.config.models.main;
+  const childEnv =
+    model === options.config.models.main
+      ? options.env
+      : { ...options.env, ANTHROPIC_DEFAULT_OPUS_MODEL: model, ANTHROPIC_DEFAULT_SONNET_MODEL: model };
+
   // Registry: an unwritable home (full disk, read-only volume) must not stop
   // the user's work — the run continues without persistence.
   let registered = false;
@@ -153,7 +209,7 @@ export async function runInstrumented(options: WorkerRunOptions): Promise<Worker
         kind: options.kind,
         provider: "zai.zcode",
         role,
-        model: options.config.models.main,
+        model,
         cwd: options.cwd,
         startedAt: startedAt.toISOString(),
         parent: { type: detectParent(options.env) },
@@ -263,7 +319,7 @@ export async function runInstrumented(options: WorkerRunOptions): Promise<Worker
     bus.emit({
       type: "RunStarted",
       kind: options.kind,
-      model: options.config.models.main,
+      model,
       cwd: options.cwd,
       taskTitle,
       taskHash,
@@ -271,6 +327,27 @@ export async function runInstrumented(options: WorkerRunOptions): Promise<Worker
     });
   } catch (error) {
     logger.debug(`worker-run: RunStarted emit failed: ${errorMessage(error)}`);
+  }
+
+  // D3: with the shipped config a tight quota never refuses and never kills —
+  // it warns. This event plus the one stderr line below are the whole of that
+  // warning, and `routingAdvice` in summary.json is its durable half.
+  if (preflight.decision !== null && preflight.decision.wouldRefuse) {
+    try {
+      bus.emit({
+        type: "BudgetWarning",
+        zone: preflight.decision.zone,
+        remainingRatio: preflight.remainingRatio,
+        usableBudget: preflight.decision.usableBudget,
+        estimatedRemaining: preflight.decision.estimatedCost,
+      });
+      stderr.write(
+        `[Router] ${preflight.decision.zone}: estimated ${round2(preflight.decision.estimatedCost)} credits ` +
+          `vs ${round2(preflight.decision.usableBudget)} usable — running anyway on ${model}\n`,
+      );
+    } catch (error) {
+      logger.debug(`worker-run: budget warning failed: ${errorMessage(error)}`);
+    }
   }
 
   try {
@@ -292,7 +369,7 @@ export async function runInstrumented(options: WorkerRunOptions): Promise<Worker
     const child = await (options.spawnImpl ?? spawnAgentStream)(options.claudePath, {
       args: [...options.args, "--output-format", "stream-json", "--verbose"],
       cwd: options.cwd,
-      env: options.env,
+      env: childEnv,
       onStdoutLine: handleStdoutLine,
       onStderrLine: handleStderrLine,
     });
@@ -322,9 +399,32 @@ export async function runInstrumented(options: WorkerRunOptions): Promise<Worker
     }
   }
 
+  // Close the measurement loop (Phase E). `actualCredits` is what makes the
+  // D3 evidence answer its question: a `wouldRefuse: true` run next to the
+  // credits it really consumed is how 2.1 learns whether the refusal would
+  // have been wrong. Both halves are best-effort and never fail the run.
+  const summary = summarize(seen);
+  const actualCredits = await closeMeasurement(options, home, preflight, model, role, summary);
+
   try {
     if (registered) {
-      finishRun(home, id, summarize(seen));
+      finishRun(home, id, {
+        ...summary,
+        ...(preflight.decision === null
+          ? {}
+          : {
+              routingAdvice: {
+                wouldRefuse: preflight.decision.wouldRefuse,
+                // Rounded on the way to disk: p90 × safetyFactor produces
+                // values like 31.200000000000003, and this file is permanent
+                // history that 2.1 reads back.
+                estimatedCost: round2(preflight.decision.estimatedCost),
+                usableBudget: round2(preflight.decision.usableBudget),
+                zone: preflight.decision.zone,
+                actualCredits,
+              },
+            }),
+      });
     }
   } catch (error) {
     logger.debug(`worker-run: writing summary failed: ${errorMessage(error)}`);
@@ -341,6 +441,156 @@ export async function runInstrumented(options: WorkerRunOptions): Promise<Worker
   const code =
     childCode === ExitCode.Success && sawRunCompleted ? ExitCode.Success : ExitCode.ChildAgentFailed;
   return { code, runId: id, runDir: dir };
+}
+
+/**
+ * What preflight learned. `decision: null` means preflight could not run at
+ * all, and the run proceeds exactly as v1 did — unrouted, on the main model.
+ */
+interface PreflightResult {
+  readonly decision: RouteDecision | null;
+  readonly snapshot: BudgetSnapshot | null;
+  /** min of the two windows — the number BudgetWarning reports. */
+  readonly remainingRatio: number;
+  readonly taskKind: TaskKind;
+}
+
+/**
+ * Reads the quota, estimates the task on BOTH models and asks the router what
+ * to do (Phase E). Wrapped whole in a try/catch on purpose: routing is an
+ * optimization layered onto a working v1 path, so every failure mode here —
+ * no key, endpoint down, unreadable samples — has to degrade to "run the task
+ * on the main model" rather than take the run down with it.
+ */
+async function runPreflight(options: WorkerRunOptions, home: string): Promise<PreflightResult> {
+  try {
+    const source = options.budgetSource ?? fetchBudget;
+    const snapshot = await source({
+      home,
+      key: preflightKey(options),
+      refresh: options.refreshQuota,
+      ttlSec: options.config.routing.quotaCacheTtlSec,
+    });
+    const taskKind = classifyTask(options.prompt);
+    const fastModel = options.config.models.fast;
+    return {
+      decision: decideRoute({
+        snapshot,
+        estimates: {
+          main: estimateCost(home, taskKind, options.config.models.main, fastModel),
+          fast: estimateCost(home, taskKind, fastModel, fastModel),
+        },
+        config: options.config,
+        requestedModel: options.requestedModel,
+        force: options.force,
+      }),
+      snapshot,
+      remainingRatio: Math.min(snapshot.fiveHour.remainingRatio, snapshot.weekly.remainingRatio),
+      taskKind,
+    };
+  } catch (error) {
+    logger.debug(`worker-run: preflight unavailable, running unrouted: ${errorMessage(error)}`);
+    return { decision: null, snapshot: null, remainingRatio: 0, taskKind: "other" };
+  }
+}
+
+/** `secrets` exists for redaction; its first entry is the key every caller passes. */
+function preflightKey(options: WorkerRunOptions): string | undefined {
+  return options.zaiKey ?? options.secrets.find((secret) => secret !== undefined);
+}
+
+/**
+ * The enforced preflight refusal (exit 41, decision D2). stdout carries
+ * exactly one HandoffResult JSON and nothing else — contract C1 still holds,
+ * the "final text" of a run that never ran IS this record — while the human
+ * explanation goes to stderr in the standard ERROR format.
+ */
+function writeRefusal(
+  stdout: { write(text: string): void },
+  stderr: NodeJS.WriteStream | NodeJS.WritableStream,
+  decision: RouteDecision,
+  id: string,
+  taskTitle: string,
+): void {
+  const estimated = round2(decision.estimatedCost);
+  const usable = round2(decision.usableBudget);
+  stdout.write(
+    JSON.stringify({
+      status: "handoff_required",
+      run_id: id,
+      reason: "quota_insufficient",
+      completed: [],
+      pending: [taskTitle],
+      handoff_path: null,
+      estimated_cost: estimated,
+      usable_quota: usable,
+    }) + "\n",
+  );
+  try {
+    stderr.write(formatGlmError(Errors.quotaInsufficient(estimated, usable)) + "\n");
+  } catch (error) {
+    logger.debug(`worker-run: writing the refusal diagnostic failed: ${errorMessage(error)}`);
+  }
+}
+
+/**
+ * Second quota reading, and the cost sample it may earn (Phase E, hedge H4).
+ * The read bypasses the cache — a cached start snapshot would otherwise be
+ * subtracted from itself for every run inside one TTL window, reporting 0
+ * credits for work that really cost something.
+ *
+ * Returns the credits this run consumed, or null when the measurement is not
+ * clean (`isCleanMeasurement`): a concurrent run or a window reset makes the
+ * delta fiction, and recording fiction would poison the very history the
+ * estimator and v4's adaptive routing are meant to learn from.
+ */
+async function closeMeasurement(
+  options: WorkerRunOptions,
+  home: string,
+  preflight: PreflightResult,
+  model: string,
+  role: AgentRole,
+  summary: RunSummary,
+): Promise<number | null> {
+  if (preflight.snapshot === null) {
+    return null;
+  }
+  try {
+    const source = options.budgetSource ?? fetchBudget;
+    const endSnapshot = await source({ home, key: preflightKey(options), refresh: true, ttlSec: 0 });
+    const activeRunCount = options.activeRunCount?.() ?? listActive(home).length;
+    if (!isCleanMeasurement({ startSnapshot: preflight.snapshot, endSnapshot, activeRunCount })) {
+      return null;
+    }
+    const credits = endSnapshot.fiveHour.used - preflight.snapshot.fiveHour.used;
+    recordSample(home, {
+      ts: endSnapshot.fetchedAt,
+      taskKind: preflight.taskKind,
+      model,
+      // C3: a basename, never the full path — the repo NAME is what the
+      // estimator groups by, and the directory layout is nobody's business.
+      repo: path.basename(options.cwd),
+      credits,
+      turns: summary.turns,
+      tokensIn: summary.tokensIn,
+      tokensOut: summary.tokensOut,
+      provider: "zai.zcode",
+      role,
+      // "none" is genuinely unknown, not a failure: the run never validated.
+      validationOk: summary.validation === "none" ? null : summary.validation === "ok",
+      retries: summary.retries,
+      costClass: "subscription",
+    });
+    return credits;
+  } catch (error) {
+    logger.debug(`worker-run: closing the cost measurement failed: ${errorMessage(error)}`);
+    return null;
+  }
+}
+
+/** Credits are reported to two decimals; the endpoint's own numbers are integers. */
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 /** An explicit mode wins outright; "auto" defers to the Phase C resolution order. */
