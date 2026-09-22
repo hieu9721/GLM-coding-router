@@ -77,8 +77,16 @@ Claude Code / Codex → shell command → glm-chat / glm-worker / glm-review →
 - `src/handoff/` — `bundle.ts` (the `handoff/` dir: checkpoint, `diff.patch`, `handoff.md`,
   `handoff.json`; written whenever a run dies with work on disk) and `parent-handoff.ts`
   (`HandoffResult` JSON on stdout, exit 41/42).
-- `src/tui/` — all ANSI behind `render.ts`; `progress.ts` is the stderr renderer
-  (`rich` on a TTY, `nested` `[GLM]` lines when piped, `off`).
+- `src/tui/` — all ANSI behind `render.ts` (`displayWidth`/`padEndDisplay`/`truncate` measure
+  terminal display columns, not `string.length`, so CJK/emoji content lays out correctly);
+  `progress.ts` is the stderr renderer for worker runs (`rich` on a TTY, `nested` `[GLM]` lines
+  when piped, `off`); `command-ui.ts` is the shared header/section/row/bar layer for the
+  management screens (`doctor`, `status`, `usage`, the root landing page — specs/terminal-ui-doctor.md).
+- `src/commands/doctor-auth.ts` — pure authentication-state mapping and the `HEALTHY | ATTENTION
+  | UNVERIFIED | ISSUES` verdict precedence for `doctor`; `src/commands/landing.ts` — the offline
+  `glm-router` root page. `src/core/key-inspector.ts` — the two-source (process vs. per-user
+  store) key comparison `doctor` uses to warn on a stale override, without ever changing which
+  key `resolveZaiApiKey()` actually picks.
 - `tests/{unit,integration,fixtures}` — integration tests exercise the real command surface
   against `tests/fixtures/fake-agent.mjs` standing in for `claude.exe`.
 
