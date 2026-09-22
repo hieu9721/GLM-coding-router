@@ -1,5 +1,7 @@
 # GLM Coding Router
 
+[![npm version](https://img.shields.io/npm/v/glm-coding-router.svg)](https://www.npmjs.com/package/glm-coding-router)
+
 GLM Coding Plan workers for Claude Code and Codex — on Windows, Linux, and (experimentally) macOS.
 
 Claude Code and Codex stay your orchestrators — they keep responsibility for requirements,
