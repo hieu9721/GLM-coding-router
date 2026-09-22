@@ -97,12 +97,30 @@ export function describeKeyStore(store: UserEnvStore): string {
 }
 
 /**
- * Read a variable from the per-user store. Returns undefined on any failure —
- * callers fall back or raise their own error.
+ * Result of a diagnostic store read: `readable` is false only when the read
+ * itself failed (process spawn error, nonzero exit, etc.) — a legitimately
+ * unset variable is `{ readable: true, value: undefined }`. Doctor's
+ * credential comparison (specs/terminal-ui-doctor.md §C) needs this
+ * distinction; plain `readUserEnv` callers do not and keep their existing
+ * "undefined on any failure" contract.
  */
-export function readUserEnv(name: string, deps: UserEnvDeps = {}): string | undefined {
+export interface UserEnvReadResult {
+  readonly readable: boolean;
+  readonly value: string | undefined;
+}
+
+/**
+ * Read a variable from the per-user store, distinguishing "no store" / "not
+ * set" (readable: true, value: undefined) from "the read itself failed"
+ * (readable: false). `readUserEnv` below is a thin wrapper that collapses
+ * both to `undefined` for existing callers.
+ */
+export function readUserEnvDiagnostic(name: string, deps: UserEnvDeps = {}): UserEnvReadResult {
   assertEnvVarName(name);
   const store = detectUserEnvStore(deps);
+  if (store === "none") {
+    return { readable: true, value: undefined };
+  }
   const run = deps.run ?? defaultRun;
   try {
     let value: string;
@@ -133,14 +151,20 @@ export function readUserEnv(name: string, deps: UserEnvDeps = {}): string | unde
           { capture: true },
         );
         break;
-      case "none":
-        return undefined;
     }
     const trimmed = value.trim();
-    return trimmed || undefined;
+    return { readable: true, value: trimmed || undefined };
   } catch {
-    return undefined;
+    return { readable: false, value: undefined };
   }
+}
+
+/**
+ * Read a variable from the per-user store. Returns undefined on any failure —
+ * callers fall back or raise their own error.
+ */
+export function readUserEnv(name: string, deps: UserEnvDeps = {}): string | undefined {
+  return readUserEnvDiagnostic(name, deps).value;
 }
 
 /**

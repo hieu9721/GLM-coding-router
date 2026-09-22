@@ -64,7 +64,7 @@ export function statusCommand(options: GlobalOptions, deps: StatusDeps = {}): nu
   const lines = [
     `GLM Coding Router v${version}`,
     "",
-    `Z.ai key        ${resolved ? "configured" : "not configured"}`,
+    `Z.ai key        ${resolved ? "configured (not verified — run: glm-router doctor)" : "not configured"}`,
     `Claude          ${claudeInstalled ? "installed" : "missing"}`,
     `Codex           ${codexInstalled ? "installed" : "missing"}`,
     "",

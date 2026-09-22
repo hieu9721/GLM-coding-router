@@ -70,7 +70,8 @@ export function createWriter(
   const terminal = stream as { isTTY?: boolean; columns?: number };
   const isTTY = terminal.isTTY === true;
   const noColor = (process.env.NO_COLOR ?? "").length > 0;
-  const color = opts?.color ?? (isTTY && !noColor);
+  const dumbTerm = process.env.TERM === "dumb";
+  const color = opts?.color ?? (isTTY && !noColor && !dumbTerm);
   return {
     write(text: string): void {
       stream.write(text);

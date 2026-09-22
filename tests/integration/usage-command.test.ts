@@ -209,7 +209,9 @@ describe("usageCommand failures (specs/usage.md)", () => {
       baseDeps({ fetchImpl: (async () => jsonResponse({ code: 401, msg: "bad key" })) as typeof fetch }),
     );
     expect(codeApi).toBe(1);
-    expect(apiCode.text()).toContain("bad key");
+    // The provider's `msg` is never echoed (specs/terminal-ui-doctor.md §D "Security").
+    expect(apiCode.text()).not.toContain("bad key");
+    expect(apiCode.text()).toContain("code 401");
   });
 
   it("non-JSON body renders ✗ and exits 1", async () => {

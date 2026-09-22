@@ -398,8 +398,9 @@ the protocol channel stays clean.
 
 ```text
 glm-router init              guided setup
-glm-router doctor [--network]  full runtime diagnosis
-glm-router status            quick offline overview
+glm-router doctor [--network|--offline]  full runtime diagnosis, authenticates the
+                              effective key online by default (--offline skips that)
+glm-router status            quick offline overview (key presence only, not verified)
 glm-router key set           store ZAI_API_KEY in this platform's per-user store
 glm-router key check         key configured? from which source?
 glm-router config show
@@ -481,6 +482,9 @@ The key is never cached to disk.
 | `ERROR [ZAI_KEY_MISSING]` | `glm-router key set`, then open a **new** terminal |
 | `ERROR [CLAUDE_NOT_FOUND]` | Install Claude Code, or `glm-router config set claudePath C:\path\to\claude.exe` |
 | Key works in a new terminal but not inside Orca | Expected — workers re-read the per-user store automatically; run `glm-router doctor` to confirm |
+| `doctor` says `ATTENTION` with "different from the saved key" | The process environment has a key that differs from what `key set` saved; process always wins. Close/restart the terminal's hosting app to drop the stale value, or update the intentional override |
+| `doctor` says `ISSUES` with an HTTP 401/403 | The monitor endpoint rejected the *effective* key itself — not a comparison mismatch. Run `glm-router key set` with a valid key |
+| `doctor` says `UNVERIFIED` | The key could not be confirmed either way (timeout, 429, 5xx, or a malformed response) — this is not proof the key is invalid; retry, or check network/proxy |
 | `glm-router key set` prints an `export` line instead of saving | This platform has no secret store (e.g. Linux without `secret-tool`). Add the line to your shell profile; `glm-router key check` verifies it |
 | The worker creates files but never runs the tests | Its Bash allowlist is empty. `glm-router config show` → `worker.allowedBash`; the default list covers common test commands |
 | `glm-*` not on PATH after install | Reopen the terminal; check `npm config get prefix` is on PATH |
@@ -490,7 +494,11 @@ The key is never cached to disk.
 | A run lists as FAILED with no summary | It died mid-run; `runs show <id>` rebuilds the summary from `events.jsonl`, `runs clean --orphans` reaps stale active entries |
 | `runs/` history grows large | `glm-router runs clean --older-than 30d`, or tune `history.retentionDays` / `history.maxRuns` |
 
-Run `glm-router doctor` (add `--network` to probe the Z.ai endpoint) for a full diagnosis.
+Run `glm-router doctor` for a full diagnosis — it authenticates the effective key against
+the Z.ai monitor endpoint by default (no coding quota consumed). Add `--offline` for local
+checks only, or `--network` to also probe the configured Anthropic endpoint's reachability
+(reachability only — not the same thing as a verified key). `glm-router` with no arguments
+prints a quick command reference.
 
 ## Uninstall
 

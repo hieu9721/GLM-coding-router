@@ -4,6 +4,7 @@ import {
   describeShellExport,
   detectUserEnvStore,
   readUserEnv,
+  readUserEnvDiagnostic,
   writeUserEnv,
   deleteUserEnv,
   type RunCommand,
@@ -84,6 +85,47 @@ describe("readUserEnv", () => {
     expect(() => readUserEnv("BAD-NAME; rm -rf /", { platform: "linux", hasCommand: has("secret-tool"), run }))
       .toThrow(/Invalid environment variable name/);
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe("readUserEnvDiagnostic (specs/terminal-ui-doctor.md §C)", () => {
+  it("is readable with value=undefined when there is no store at all", () => {
+    const { run, calls } = recorder("ignored");
+    expect(readUserEnvDiagnostic("ZAI_API_KEY", { platform: "linux", hasCommand: () => false, run })).toEqual({
+      readable: true,
+      value: undefined,
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("is readable with the trimmed value on a normal successful read", () => {
+    const { run } = recorder("  secret-value \n");
+    expect(
+      readUserEnvDiagnostic("ZAI_API_KEY", { platform: "darwin", hasCommand: has("security"), run }),
+    ).toEqual({ readable: true, value: "secret-value" });
+  });
+
+  it("is readable with value=undefined when the store exists but is empty", () => {
+    const { run } = recorder("   \n");
+    expect(
+      readUserEnvDiagnostic("ZAI_API_KEY", { platform: "darwin", hasCommand: has("security"), run }),
+    ).toEqual({ readable: true, value: undefined });
+  });
+
+  it("is NOT readable (distinct from empty) when the store command itself fails", () => {
+    const run: RunCommand = () => {
+      throw new Error("keyring locked");
+    };
+    expect(
+      readUserEnvDiagnostic("ZAI_API_KEY", { platform: "darwin", hasCommand: has("security"), run }),
+    ).toEqual({ readable: false, value: undefined });
+  });
+
+  it("readUserEnv collapses both empty and unreadable to undefined (unchanged existing contract)", () => {
+    const failingRun: RunCommand = () => {
+      throw new Error("keyring locked");
+    };
+    expect(readUserEnv("ZAI_API_KEY", { platform: "darwin", hasCommand: has("security"), run: failingRun })).toBeUndefined();
   });
 });
 

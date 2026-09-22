@@ -46,6 +46,55 @@ function throwingFetch(): typeof fetch {
   return vi.fn().mockRejectedValue(new Error("network down")) as unknown as typeof fetch;
 }
 
+/** A minimally valid, accepted monitor response (spec §D "Success validation"). */
+const ACCEPTED_PAYLOAD = { code: 200, success: true, data: { level: "lite", limits: [] } };
+
+function jsonResponse(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
+}
+
+/** Routes by URL so a single fetchImpl can answer both the monitor and the endpoint probe. */
+function routedFetch(quota: () => Promise<Response>, endpointStatus = 200): { fn: typeof fetch; calls: string[] } {
+  const calls: string[] = [];
+  const fn = (async (input: string | URL) => {
+    const href = typeof input === "string" ? input : input.toString();
+    calls.push(href);
+    if (href.includes("monitor/usage/quota")) return quota();
+    return new Response(null, { status: endpointStatus });
+  }) as unknown as typeof fetch;
+  return { fn, calls };
+}
+
+/**
+ * SAFETY: every test must supply this explicitly or through `baseDeps` below.
+ * Leaving `readUserEnvDiagnostic` unset falls through to the REAL per-user
+ * store reader, which on a developer's own machine reads the REAL saved
+ * ZAI_API_KEY — do not let a doctor test touch the real secret store.
+ */
+function noStoreDiagnostic(value: string | undefined = undefined): { readable: boolean; value: string | undefined } {
+  return { readable: true, value };
+}
+
+interface Deps {
+  home?: string;
+  env?: NodeJS.ProcessEnv;
+  readUserEnv?: (name: string) => string | undefined;
+  readUserEnvDiagnostic?: (name: string) => { readable: boolean; value: string | undefined };
+  fetchImpl?: typeof fetch;
+  store?: "windows-user-env" | "macos-keychain" | "libsecret" | "none";
+  platform?: NodeJS.Platform;
+}
+
+function baseDeps(overrides: Deps = {}): Deps {
+  return {
+    readUserEnv: overrides.readUserEnv ?? (() => undefined),
+    readUserEnvDiagnostic: overrides.readUserEnvDiagnostic ?? (() => noStoreDiagnostic()),
+    store: overrides.store ?? "none",
+    platform: overrides.platform ?? "win32",
+    ...overrides,
+  };
+}
+
 describe("probeEndpoint (spec §42)", () => {
   it("reports reachable for a 2xx/4xx response (auth errors still prove reachability)", async () => {
     await expect(probeEndpoint("https://api.z.ai/api/anthropic", fakeFetch(401))).resolves.toBe(
@@ -66,8 +115,48 @@ describe("probeEndpoint (spec §42)", () => {
   });
 });
 
-describe("doctorCommand (spec §9, §42)", () => {
-  it("renders JSON with status HEALTHY and exit 0 when every check passes", async () => {
+describe("doctorCommand (specs/terminal-ui-doctor.md)", () => {
+  it("--offline and --network together is an argument error (exit 2)", async () => {
+    await expect(
+      doctorCommand({ offline: true, network: true }, baseDeps({ home: temp(), env: {} })),
+    ).rejects.toMatchObject({ exitCode: 2 });
+  });
+
+  it("--offline: UNVERIFIED (authentication skipped), exit 0, no fetch call, when local checks pass", async () => {
+    const home = temp();
+    const dir = temp();
+    writeFileSyncAll(path.join(dir, exeName("claude")), "");
+    const out = captureStdout();
+    const fetchSpy = vi.fn();
+
+    const code = await doctorCommand(
+      { json: true, offline: true },
+      baseDeps({ home, env: isolatedEnv([dir], { ZAI_API_KEY: "test-key" }), fetchImpl: fetchSpy as unknown as typeof fetch }),
+    );
+
+    expect(code).toBe(0);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const parsed = JSON.parse(out.text());
+    expect(parsed.status).toBe("UNVERIFIED");
+    expect(parsed.authentication.state).toBe("skipped");
+    expect(parsed.authentication.checked).toBe(false);
+  });
+
+  it("--offline: ISSUES, exit 1, when a required local check still fails", async () => {
+    const home = temp();
+    const emptyPath = temp();
+    const out = captureStdout();
+
+    const code = await doctorCommand(
+      { json: true, offline: true },
+      baseDeps({ home, env: isolatedEnv([emptyPath]) }),
+    );
+
+    expect(code).toBe(1);
+    expect(JSON.parse(out.text()).status).toBe("ISSUES");
+  });
+
+  it("HEALTHY, exit 0: monitor accepts the key and there is nothing to compare it against", async () => {
     const home = temp();
     const dir = temp();
     writeFileSyncAll(path.join(dir, exeName("claude")), "");
@@ -75,68 +164,172 @@ describe("doctorCommand (spec §9, §42)", () => {
 
     const code = await doctorCommand(
       { json: true },
-      { home, env: isolatedEnv([dir], { ZAI_API_KEY: "test-key" }), readUserEnv: () => undefined },
+      baseDeps({
+        home,
+        env: isolatedEnv([dir], { ZAI_API_KEY: "test-key" }),
+        fetchImpl: (async () => jsonResponse(ACCEPTED_PAYLOAD)) as typeof fetch,
+      }),
     );
 
     expect(code).toBe(0);
     const parsed = JSON.parse(out.text());
     expect(parsed.status).toBe("HEALTHY");
-    expect(Array.isArray(parsed.checks)).toBe(true);
     expect(parsed.keySource).toBe("process-env");
-    expect(parsed.network).toBeUndefined();
+    expect(parsed.authentication).toMatchObject({ state: "verified", checked: true, reason: "accepted" });
+    expect(parsed.keyComparison).toBe("not-comparable");
+    expect(parsed.keyMismatch).toBeNull();
   });
 
-  it("renders JSON with status ISSUES and exit 1 when a check fails", async () => {
+  it("ISSUES, exit 1: missing key never calls the monitor", async () => {
     const home = temp();
     const emptyPath = temp();
     const out = captureStdout();
+    const fetchSpy = vi.fn();
 
     const code = await doctorCommand(
       { json: true },
-      { home, env: isolatedEnv([emptyPath]), readUserEnv: () => undefined },
+      baseDeps({ home, env: isolatedEnv([emptyPath]), fetchImpl: fetchSpy as unknown as typeof fetch }),
     );
 
     expect(code).toBe(1);
     const parsed = JSON.parse(out.text());
     expect(parsed.status).toBe("ISSUES");
+    expect(parsed.authentication).toMatchObject({ state: "missing", checked: false, reason: "missing-key" });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("includes the network probe result in JSON output when --network is passed", async () => {
+  it("ISSUES, exit 1: the monitor rejects the key (401)", async () => {
     const home = temp();
     const dir = temp();
     writeFileSyncAll(path.join(dir, exeName("claude")), "");
     const out = captureStdout();
 
     const code = await doctorCommand(
-      { json: true, network: true },
-      {
+      { json: true },
+      baseDeps({
         home,
         env: isolatedEnv([dir], { ZAI_API_KEY: "test-key" }),
-        readUserEnv: () => undefined,
-        fetchImpl: fakeFetch(200),
-      },
+        fetchImpl: fakeFetch(401),
+      }),
+    );
+
+    expect(code).toBe(1);
+    const parsed = JSON.parse(out.text());
+    expect(parsed.status).toBe("ISSUES");
+    expect(parsed.authentication).toMatchObject({ state: "rejected", reason: "http-401" });
+  });
+
+  it("ATTENTION, exit 0: monitor accepts the key but the process value differs from the saved one", async () => {
+    const home = temp();
+    const dir = temp();
+    writeFileSyncAll(path.join(dir, exeName("claude")), "");
+    const out = captureStdout();
+
+    const code = await doctorCommand(
+      { json: true },
+      baseDeps({
+        home,
+        env: isolatedEnv([dir], { ZAI_API_KEY: "process-key" }),
+        store: "windows-user-env",
+        readUserEnvDiagnostic: () => noStoreDiagnostic("stored-key"),
+        fetchImpl: (async () => jsonResponse(ACCEPTED_PAYLOAD)) as typeof fetch,
+      }),
+    );
+
+    expect(code).toBe(0);
+    const parsed = JSON.parse(out.text());
+    expect(parsed.status).toBe("ATTENTION");
+    expect(parsed.keyComparison).toBe("different");
+    expect(parsed.keyMismatch).toBe(true);
+  });
+
+  it("ATTENTION, exit 0: monitor accepts the key but the store could not be read for comparison", async () => {
+    const home = temp();
+    const dir = temp();
+    writeFileSyncAll(path.join(dir, exeName("claude")), "");
+    const out = captureStdout();
+
+    const code = await doctorCommand(
+      { json: true },
+      baseDeps({
+        home,
+        env: isolatedEnv([dir], { ZAI_API_KEY: "process-key" }),
+        store: "windows-user-env",
+        readUserEnvDiagnostic: () => ({ readable: false, value: undefined }),
+        fetchImpl: (async () => jsonResponse(ACCEPTED_PAYLOAD)) as typeof fetch,
+      }),
+    );
+
+    expect(code).toBe(0);
+    const parsed = JSON.parse(out.text());
+    expect(parsed.status).toBe("ATTENTION");
+    expect(parsed.keyComparison).toBe("unavailable");
+    expect(parsed.keyMismatch).toBeNull();
+  });
+
+  it("UNVERIFIED, exit 1: rate limited (429) does not claim the key is invalid", async () => {
+    const home = temp();
+    const dir = temp();
+    writeFileSyncAll(path.join(dir, exeName("claude")), "");
+    const out = captureStdout();
+
+    const code = await doctorCommand(
+      { json: true },
+      baseDeps({ home, env: isolatedEnv([dir], { ZAI_API_KEY: "test-key" }), fetchImpl: fakeFetch(429) }),
+    );
+
+    expect(code).toBe(1);
+    const parsed = JSON.parse(out.text());
+    expect(parsed.status).toBe("UNVERIFIED");
+    expect(parsed.authentication).toMatchObject({ state: "unverified", reason: "rate-limited" });
+  });
+
+  it("UNVERIFIED, exit 1: a network exception does not claim the key is invalid", async () => {
+    const home = temp();
+    const dir = temp();
+    writeFileSyncAll(path.join(dir, exeName("claude")), "");
+    const out = captureStdout();
+
+    const code = await doctorCommand(
+      { json: true },
+      baseDeps({ home, env: isolatedEnv([dir], { ZAI_API_KEY: "test-key" }), fetchImpl: throwingFetch() }),
+    );
+
+    expect(code).toBe(1);
+    expect(JSON.parse(out.text()).authentication).toMatchObject({ state: "unverified", reason: "network-error" });
+  });
+
+  it("includes the network probe result in JSON output when --network is passed, alongside authentication", async () => {
+    const home = temp();
+    const dir = temp();
+    writeFileSyncAll(path.join(dir, exeName("claude")), "");
+    const out = captureStdout();
+    const { fn } = routedFetch(async () => jsonResponse(ACCEPTED_PAYLOAD), 200);
+
+    const code = await doctorCommand(
+      { json: true, network: true },
+      baseDeps({ home, env: isolatedEnv([dir], { ZAI_API_KEY: "test-key" }), fetchImpl: fn }),
     );
 
     expect(code).toBe(0);
     const parsed = JSON.parse(out.text());
     expect(parsed.network).toBe("reachable");
+    expect(parsed.authentication.state).toBe("verified");
   });
 
-  it("never probes the network when --network is not passed", async () => {
+  it("never probes the endpoint reachability URL when --network is not passed (only the mandatory auth check runs)", async () => {
     const home = temp();
-    const emptyPath = temp();
-    const fetchSpy = vi.fn();
+    const dir = temp();
+    writeFileSyncAll(path.join(dir, exeName("claude")), "");
     captureStdout();
+    const { fn, calls } = routedFetch(async () => jsonResponse(ACCEPTED_PAYLOAD));
 
-    await doctorCommand(
-      {},
-      { home, env: isolatedEnv([emptyPath]), readUserEnv: () => undefined, fetchImpl: fetchSpy as unknown as typeof fetch },
-    );
+    await doctorCommand({}, baseDeps({ home, env: isolatedEnv([dir], { ZAI_API_KEY: "test-key" }), fetchImpl: fn }));
 
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(calls).toEqual(["https://api.z.ai/api/monitor/usage/quota/limit"]);
   });
 
-  it("renders human-readable text grouped by section, with symbols and a trailing status line", async () => {
+  it("renders human-readable text with [OK]/[FAIL] tags, a Credentials section and a RESULT line", async () => {
     const home = temp();
     const dir = temp();
     writeFileSyncAll(path.join(dir, exeName("claude")), "");
@@ -144,53 +337,71 @@ describe("doctorCommand (spec §9, §42)", () => {
 
     const code = await doctorCommand(
       {},
-      { home, env: isolatedEnv([dir], { ZAI_API_KEY: "test-key" }), readUserEnv: () => undefined },
+      baseDeps({
+        home,
+        env: isolatedEnv([dir], { ZAI_API_KEY: "test-key" }),
+        fetchImpl: (async () => jsonResponse(ACCEPTED_PAYLOAD)) as typeof fetch,
+      }),
     );
 
     expect(code).toBe(0);
     const text = out.text();
-    expect(text).toContain("GLM Coding Router Doctor");
-    expect(text).toContain("Agents");
-    expect(text).toContain("✓ Claude Code");
+    expect(text).toContain("DOCTOR");
+    expect(text).toContain("[OK]");
+    expect(text).toContain("CREDENTIALS");
     expect(text).toContain(path.join(dir, exeName("claude")));
-    expect(text).toMatch(/Status: HEALTHY\n$/);
+    expect(text).toMatch(/RESULT\s+HEALTHY/);
   });
 
-  it("renders the Network section in text output when --network is passed", async () => {
+  it("renders a Network section in text output when --network is passed and it fails, without calling it authentication", async () => {
     const home = temp();
     const dir = temp();
     writeFileSyncAll(path.join(dir, exeName("claude")), "");
     const out = captureStdout();
+    const { fn } = routedFetch(async () => jsonResponse(ACCEPTED_PAYLOAD), 503);
 
     await doctorCommand(
       { network: true },
-      {
-        home,
-        env: isolatedEnv([dir], { ZAI_API_KEY: "test-key" }),
-        readUserEnv: () => undefined,
-        fetchImpl: throwingFetch(),
-      },
+      baseDeps({ home, env: isolatedEnv([dir], { ZAI_API_KEY: "test-key" }), fetchImpl: fn }),
     );
 
     const text = out.text();
-    expect(text).toContain("Network");
-    expect(text).toContain("⚠ Z.ai endpoint not reachable");
+    expect(text).toContain("NETWORK");
+    expect(text).toContain("reachable with errors");
+    expect(text).toMatch(/RESULT\s+UNVERIFIED/);
   });
 
-  it("never prints the ZAI_API_KEY value in JSON or text output", async () => {
+  it("never prints either the process or the saved key value in JSON or text output", async () => {
     const home = temp();
-    const emptyPath = temp();
-    const out = captureStdout();
+    const dir = temp();
+    writeFileSyncAll(path.join(dir, exeName("claude")), "");
+    const jsonOut = captureStdout();
 
     await doctorCommand(
       { json: true },
-      {
+      baseDeps({
         home,
-        env: isolatedEnv([emptyPath], { ZAI_API_KEY: "super-secret-value" }),
-        readUserEnv: () => undefined,
-      },
+        env: isolatedEnv([dir], { ZAI_API_KEY: "super-secret-process-value" }),
+        store: "windows-user-env",
+        readUserEnvDiagnostic: () => noStoreDiagnostic("super-secret-stored-value"),
+        fetchImpl: fakeFetch(401),
+      }),
     );
+    expect(jsonOut.text()).not.toContain("super-secret-process-value");
+    expect(jsonOut.text()).not.toContain("super-secret-stored-value");
 
-    expect(out.text()).not.toContain("super-secret-value");
+    const textOut = captureStdout();
+    await doctorCommand(
+      {},
+      baseDeps({
+        home,
+        env: isolatedEnv([dir], { ZAI_API_KEY: "super-secret-process-value" }),
+        store: "windows-user-env",
+        readUserEnvDiagnostic: () => noStoreDiagnostic("super-secret-stored-value"),
+        fetchImpl: fakeFetch(401),
+      }),
+    );
+    expect(textOut.text()).not.toContain("super-secret-process-value");
+    expect(textOut.text()).not.toContain("super-secret-stored-value");
   });
 });

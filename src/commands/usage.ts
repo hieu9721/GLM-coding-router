@@ -8,6 +8,8 @@ import { resolveZaiApiKey } from "../core/zai-key.js";
 import { describeWindow, fetchZaiQuota } from "../core/zai-quota.js";
 import type { ZaiQuotaData } from "../core/zai-quota.js";
 import { emitJson, type GlobalOptions } from "./context.js";
+import { createCommandUi } from "../tui/command-ui.js";
+import { createWriter } from "../tui/render.js";
 
 export interface UsageDeps {
   readonly home?: string;
@@ -107,6 +109,7 @@ export async function usageCommand(options: GlobalOptions, deps: UsageDeps = {})
     return quotaError ? 1 : 0;
   }
 
+  const ui = createCommandUi(createWriter(process.stdout));
   const lines: string[] = [`GLM Coding Router v${version} — usage snapshot`, ""];
   if (quotaError) {
     lines.push(`Z.ai Coding Plan`);
@@ -119,15 +122,20 @@ export async function usageCommand(options: GlobalOptions, deps: UsageDeps = {})
     for (const limit of limits) {
       const consumed = limit.currentValue ?? "?";
       const total = limit.usage ?? "?";
-      const percentage =
+      // Never treat a missing consumed/total as zero quota — only a finite
+      // ratio with total > 0 may be turned into a percentage (spec §B.5).
+      const percentNumeric: number | undefined =
         typeof limit.percentage === "number"
           ? limit.percentage
           : typeof limit.currentValue === "number" && typeof limit.usage === "number" && limit.usage > 0
             ? Math.round((limit.currentValue / limit.usage) * 100)
-            : "?";
+            : undefined;
+      const percentage = percentNumeric ?? "?";
       const resets =
         typeof limit.nextResetTime === "number" ? ` — resets ${new Date(limit.nextResetTime).toISOString()}` : "";
       lines.push(`  ${describeWindow(limit).padEnd(15)} ${consumed} / ${total} credits (${percentage}%)${resets}`);
+      const remaining = typeof limit.remaining === "number" ? `${limit.remaining} remaining` : "remaining unknown";
+      lines.push(`    ${ui.bar(percentNumeric)} · ${remaining}`);
     }
   }
   lines.push("");

@@ -321,7 +321,7 @@ describe("dashboardCommand (specs/v2-architecture.md Phase G)", () => {
     expect(code).toBe(0);
     const text = out.text();
     expect(text).toContain("quota unavailable");
-    expect(text).toContain("boom");
+    expect(text).toContain("Z.ai monitor endpoint was unreachable");
     expect(text).toContain("repo-live");
     expect(text).toContain("COMPLETED");
   });

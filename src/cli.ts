@@ -4,6 +4,7 @@ import { version } from "./core/version.js";
 import { ExitCode } from "./core/errors.js";
 import { isMainModule } from "./core/main-guard.js";
 import { applyGlobalOptions, reportError, type GlobalOptions } from "./commands/context.js";
+import { landingCommand } from "./commands/landing.js";
 import { initCommand } from "./commands/init.js";
 import { doctorCommand } from "./commands/doctor-command.js";
 import { statusCommand } from "./commands/status.js";
@@ -34,7 +35,10 @@ program
   .option("--verbose", "debug-level output")
   .option("--dry-run", "preview file modifications without writing")
   .option("--force", "apply actions even when already done")
-  .option("--yes", "assume defaults for all prompts");
+  .option("--yes", "assume defaults for all prompts")
+  // No subcommand: an offline landing page (specs/terminal-ui-doctor.md §B.1),
+  // not a call into any command that reads config/credentials or the network.
+  .action(() => execute(() => Promise.resolve(landingCommand(globalOptions()))));
 
 /** Shared action wrapper: apply global flags, catch errors, set the exit code. */
 async function execute(action: () => Promise<number>): Promise<void> {
@@ -57,9 +61,10 @@ program
 
 program
   .command("doctor")
-  .description("diagnose the full runtime")
-  .option("--network", "also probe Z.ai endpoint reachability")
-  .action((commandOptions: { network?: boolean }) =>
+  .description("diagnose the full runtime, authenticating the effective Z.ai key by default")
+  .option("--network", "also probe Anthropic endpoint reachability")
+  .option("--offline", "local checks only; skip online key authentication")
+  .action((commandOptions: { network?: boolean; offline?: boolean }) =>
     execute(() => doctorCommand({ ...globalOptions(), ...commandOptions })),
   );
 
