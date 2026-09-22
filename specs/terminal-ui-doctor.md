@@ -1,7 +1,7 @@
 # Spec: terminal UI and credential diagnostics (pre-v3)
 
-**Status: IMPLEMENTED (core) — see "Implementation status" note above the
-acceptance checklist below for what is done vs. still pending.**
+**Status: IMPLEMENTED — all acceptance criteria checked (2026-09-22). Only intentional
+non-requirement left out: `--help` intro styling (Commander's stock output, unchanged).**
 Date: 2026-09-22. Candidate release: v2.1, not a package-version decision.
 Product design and wireframes:
 [Terminal UI & Credential Diagnostics](../docs/GLM%20Coding%20Router%20%E2%80%94%20Terminal%20UI%20%26%20Credential%20Diagnostics.md).
@@ -282,9 +282,20 @@ pre-existing tests were unaffected (ASCII display width equals length, so this i
 behavioral superset for every existing caller, including `progress.ts`'s TTY box renderer,
 which shares `truncate()` but was not otherwise touched).
 
-Not done: `--help` intro styling (left as Commander's stock output); the formal manual
-PowerShell 5.1 / PowerShell 7 / CMD acceptance pass (only exercised via the built CLI in this
-Git Bash / PowerShell 7 dev environment, including one live, real (non-mocked) `usage` call).
+**Manual PowerShell 5.1 / PowerShell 7 / CMD pass — done (2026-09-22).** Ran the built CLI
+(`node dist/cli.js`, equivalent to the installed `glm-router` shim) directly under
+`powershell.exe` (Windows PowerShell 5.1), `pwsh.exe` (PowerShell 7) and `cmd.exe` on this real
+Windows machine. Passed in all three: landing page (exit 0), `--help`, `doctor --offline` text
++ `--json` (parsed successfully, real machine state — `HEALTHY`-shaped local checks,
+`UNVERIFIED` for offline auth as expected), `status --json`, `doctor --offline --network`
+correctly rejected as an argument error (exit 2, verified via the shell's real exit code, not
+a stale `%errorlevel%`/`$LASTEXITCODE` read within the same command line — both are classic
+traps in exactly this kind of check and were caught and corrected during the run), and
+redirected/piped output confirmed byte-clean of ESC (0x1B) in all three shells. Not covered:
+an actual interactive narrow-terminal window (only non-interactive/redirected invocation is
+automatable from an agent) — the width-tier logic itself (24/40/80/120) is unit-tested instead.
+
+Not done: `--help` intro styling (left as Commander's stock output).
 
 ## Acceptance criteria
 
@@ -302,7 +313,7 @@ Git Bash / PowerShell 7 dev environment, including one live, real (non-mocked) `
       see the 2026-09-22 session log entry in MEMORY.md).
 - [x] Init/status remain offline; usage/dashboard/budget/MCP monitor callers remain safe
       (full regression suite green, including all pre-existing dashboard/budget/MCP tests).
-- [ ] Build, full tests, lint pass (yes); documented Windows manual checks (not done — pending).
+- [x] Build, full tests, lint and documented Windows manual checks (PS 5.1/PS 7/CMD) pass.
 
 ## Validation
 
