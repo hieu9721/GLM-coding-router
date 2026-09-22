@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createWriter, type Writer } from "../../src/tui/render.js";
+import { createWriter, displayWidth, type Writer } from "../../src/tui/render.js";
 import { createCommandUi } from "../../src/tui/command-ui.js";
 
 /** In-memory writer with a fixed width/color/TTY, for deterministic geometry tests. */
@@ -19,6 +19,10 @@ function fakeWriter(opts: { columns?: number; color?: boolean; isTTY?: boolean }
 
 function visibleWidth(line: string): number {
   return line.replace(/\u001b\[[0-9;]*m/g, "").length;
+}
+
+function visibleWidthWide(line: string): number {
+  return displayWidth(line.replace(/\u001b\[[0-9;]*m/g, ""));
 }
 
 describe("createCommandUi (specs/terminal-ui-doctor.md §A)", () => {
@@ -74,6 +78,36 @@ describe("createCommandUi (specs/terminal-ui-doctor.md §A)", () => {
     expect(row).not.toMatch(/\[(OK|WARN|FAIL|INFO)\]/);
     expect(row).toContain("Runs");
     expect(row).toContain("3");
+  });
+
+  it("never exceeds width with CJK/emoji content that has spaces to wrap at (labels, values, header, detail)", () => {
+    for (const columns of [40, 80]) {
+      const writer = fakeWriter({ columns });
+      const ui = createCommandUi(writer);
+      const block = [
+        ui.header("GLM CODING ROUTER — 诊断报告 🚀", "路径诊断 credential 检查 diagnostics"),
+        ui.row("路径", "已配置 configured 状态 🚀", "ok"),
+        ui.row("狀態", "已配置 🚀🚀🚀", "info"),
+        ui.detail("这是 一段 很长 的 说明 文字 用来 测试 自动 换行 是否 按 显示 宽度 而 不是 字符数 来 计算 这个 结果"),
+      ].join("\n");
+      for (const line of block.split("\n")) {
+        const visible = line.replace(/\u001b\[[0-9;]*m/g, "");
+        expect(visibleWidthWide(visible)).toBeLessThanOrEqual(columns);
+      }
+    }
+  });
+
+  it("measures a CJK path's real (wider) display width — it may still overflow when unbroken, same as a long ASCII path", () => {
+    const writer = fakeWriter({ columns: 40 });
+    const ui = createCommandUi(writer);
+    const cjkPath = "C:\\用户\\示例\\路径\\claude.exe";
+    const row = ui.row("路径", cjkPath, "ok");
+    // Content is preserved verbatim (never cut mid-path), matching the
+    // existing ASCII "never truncates a long path" contract.
+    expect(row).toContain(cjkPath);
+    expect(row).not.toContain("…");
+    // But its real width is correctly measured as double a naive .length count.
+    expect(displayWidth(cjkPath)).toBeGreaterThan(cjkPath.length);
   });
 
   it("never truncates a long path — it wraps to an indented continuation instead", () => {

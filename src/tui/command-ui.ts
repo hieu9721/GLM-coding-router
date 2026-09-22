@@ -7,7 +7,7 @@
  * All ANSI stays in render.ts (`paint`); this file composes plain strings
  * and colors them through that one choke point.
  */
-import { paint, truncate, type Writer } from "./render.js";
+import { displayWidth, padEndDisplay, paint, truncate, type Writer } from "./render.js";
 
 export type UiStatus = "ok" | "warn" | "fail" | "info";
 
@@ -64,10 +64,14 @@ function border(width: number): string {
 
 function boxLine(text: string, width: number): string {
   const inner = Math.max(width - 4, 0);
-  return `| ${truncate(text, inner).padEnd(inner)} |`;
+  return `| ${padEndDisplay(truncate(text, inner), inner)} |`;
 }
 
-/** Wrap `text` to `width`-wide lines without breaking a word mid-way when avoidable. */
+/**
+ * Wrap `text` to `width`-wide lines (measured in display columns, not code
+ * units — spec §A "Width uses display cells") without breaking a word
+ * mid-way when avoidable.
+ */
 function wrap(text: string, width: number): string[] {
   if (width <= 0) return [text];
   const words = text.split(/\s+/).filter((w) => w.length > 0);
@@ -75,7 +79,7 @@ function wrap(text: string, width: number): string[] {
   let current = "";
   for (const word of words) {
     const candidate = current.length === 0 ? word : `${current} ${word}`;
-    if (candidate.length > width && current.length > 0) {
+    if (displayWidth(candidate) > width && current.length > 0) {
       lines.push(current);
       current = word;
     } else {
@@ -119,7 +123,7 @@ export function createCommandUi(writer: Writer, options: { quiet?: boolean } = {
       const cleanValue = sanitize(value, false);
 
       const tagField = status !== undefined ? STATUS_TAG[status].padEnd(TAG_COLUMN) : "";
-      const labelField = cleanLabel.padEnd(LABEL_COLUMN);
+      const labelField = padEndDisplay(cleanLabel, LABEL_COLUMN);
       const plainPrefix = `${BASE_INDENT}${tagField}${labelField}`;
       const singleLine = `${plainPrefix}${cleanValue}`;
 
@@ -129,7 +133,7 @@ export function createCommandUi(writer: Writer, options: { quiet?: boolean } = {
         return `${BASE_INDENT}${paint(writer, STATUS_STYLE[status], tag)}${tagField.slice(tag.length)}${labelField}`;
       };
 
-      if (cleanValue.length === 0 || singleLine.replace(/\s+$/, "").length <= width) {
+      if (cleanValue.length === 0 || displayWidth(singleLine.replace(/\s+$/, "")) <= width) {
         return `${coloredPrefix()}${cleanValue}`.replace(/\s+$/, "");
       }
 

@@ -269,9 +269,20 @@ verdict precedence, pure/unit-tested), `src/commands/doctor-command.ts` (rewritt
 text renderer changed, verified live against the real Z.ai monitor endpoint. 647 tests pass
 (up from 557), build+lint clean.
 
-Not done: `--help` intro styling (left as Commander's stock output); wide-character (CJK/emoji)
-display-width handling in `command-ui.ts` (current width math is `string.length`, not display
-cells — spec explicitly calls this out and it was not addressed); the formal manual
+Wide-character display width: `src/tui/render.ts` now exports `displayWidth`/`padEndDisplay`,
+a dependency-free simplified wcwidth approximation (0 for combining marks/control chars, 2 for
+CJK/Hangul/Fullwidth/common-emoji ranges, 1 otherwise — see the code comment for the exact
+ranges and their rationale). `truncate()` and every width/padding calculation in
+`command-ui.ts` (`row`, `wrap`, `boxLine`) now measure display columns instead of
+`string.length`. Content-preservation still wins over strict width for an unbroken long token
+(a path, or CJK prose with no spaces to wrap at) — this was already the deliberate contract for
+ASCII paths (see the "never truncates a long path" test) and is now correctly *measured* for
+wide characters too, not a new guarantee that such content gets forcibly broken. All 557
+pre-existing tests were unaffected (ASCII display width equals length, so this is a strict
+behavioral superset for every existing caller, including `progress.ts`'s TTY box renderer,
+which shares `truncate()` but was not otherwise touched).
+
+Not done: `--help` intro styling (left as Commander's stock output); the formal manual
 PowerShell 5.1 / PowerShell 7 / CMD acceptance pass (only exercised via the built CLI in this
 Git Bash / PowerShell 7 dev environment, including one live, real (non-mocked) `usage` call).
 
@@ -280,7 +291,7 @@ Git Bash / PowerShell 7 dev environment, including one live, real (non-mocked) `
 - [x] Full Commander help and commands remain reachable; landing is offline (verified live).
 - [x] Four management screens (landing, doctor, status, usage) share the proposed
       header/section/row hierarchy and actionable hints.
-- [ ] Width 24/40/80/120 and long paths pass (unit-tested); wide characters do not — known gap.
+- [x] Width 24/40/80/120, long paths and wide characters (CJK/emoji, display-cell width) pass.
 - [x] NO_COLOR, TERM=dumb, pipes, quiet and JSON behave as specified (incl. the TERM=dumb fix).
 - [x] Doctor authenticates the exact effective key once per invocation, uncached.
 - [x] Two-source comparison catches a stale override without changing key precedence.

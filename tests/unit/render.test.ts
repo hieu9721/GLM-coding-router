@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createWriter, paint, truncate } from "../../src/tui/render.js";
+import { createWriter, displayWidth, padEndDisplay, paint, truncate } from "../../src/tui/render.js";
 
 function ttyStream(): NodeJS.WriteStream {
   return { isTTY: true, columns: 80, write: () => true } as unknown as NodeJS.WriteStream;
@@ -61,5 +61,58 @@ describe("truncate", () => {
 
   it("returns empty for a non-positive max", () => {
     expect(truncate("x", 0)).toBe("");
+  });
+
+  it("counts wide (CJK) characters as 2 columns, not 1 code unit (specs/terminal-ui-doctor.md §A)", () => {
+    // "文件路径测试用例" is 8 wide chars = 16 columns.
+    const wide = "文件路径测试用例";
+    expect(displayWidth(wide)).toBe(16);
+    const cut = truncate(wide, 10);
+    expect(displayWidth(cut)).toBeLessThanOrEqual(10);
+    expect(cut.endsWith("…")).toBe(true);
+  });
+
+  it("does not cut a string whose display width already fits, even with wide characters", () => {
+    const wide = "文件路径"; // 4 wide chars = 8 columns
+    expect(truncate(wide, 8)).toBe(wide);
+  });
+});
+
+describe("displayWidth (specs/terminal-ui-doctor.md §A)", () => {
+  it("is the plain length for ASCII text", () => {
+    expect(displayWidth("hello world")).toBe(11);
+  });
+
+  it("counts each CJK character as 2 columns", () => {
+    expect(displayWidth("中文")).toBe(4);
+  });
+
+  it("counts common emoji as 2 columns", () => {
+    expect(displayWidth("🚀")).toBe(2);
+  });
+
+  it("counts zero-width joiners/variation selectors/combining marks as 0", () => {
+    expect(displayWidth("é")).toBe(1); // "é" as e + combining acute accent
+    expect(displayWidth("﻿")).toBe(0); // BOM / zero-width no-break space
+  });
+
+  it("handles a mix of ASCII and wide characters", () => {
+    expect(displayWidth("path: 路径/file.txt")).toBe("path: ".length + 4 + "/file.txt".length);
+  });
+});
+
+describe("padEndDisplay", () => {
+  it("pads ASCII text exactly like String.padEnd", () => {
+    expect(padEndDisplay("abc", 6)).toBe("abc   ");
+  });
+
+  it("pads a wide-character string by fewer spaces than padEnd would (correct visual column)", () => {
+    // "中文" is 2 code units but 4 display columns — target 6 columns needs 2 spaces, not 4.
+    expect(padEndDisplay("中文", 6)).toBe("中文  ");
+    expect(padEndDisplay("中文", 6).length).toBe(4); // 2 CJK chars + 2 spaces, in UTF-16 units
+  });
+
+  it("never truncates when already at/over the target width", () => {
+    expect(padEndDisplay("中文中文", 4)).toBe("中文中文");
   });
 });

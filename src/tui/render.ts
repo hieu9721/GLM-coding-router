@@ -86,15 +86,84 @@ export function createWriter(
 }
 
 /**
- * Cut `text` to `max` characters, marking the cut with a single ellipsis
+ * Terminal display width of one Unicode code point: 0 for combining marks,
+ * variation selectors and control characters, 2 for East Asian Wide/Fullwidth
+ * ranges and common emoji, 1 otherwise. A simplified, dependency-free
+ * approximation of Markus Kuhn's wcwidth (specs/terminal-ui-doctor.md §A
+ * "Width uses display cells, not ANSI string length") — good enough for
+ * layout purposes without pulling in a wcwidth/string-width package, which
+ * would break the TUI's dependency-free design (specs/v2-architecture.md D1).
+ */
+function codePointWidth(cp: number): 0 | 1 | 2 {
+  if (
+    cp === 0 ||
+    (cp >= 0x0001 && cp <= 0x001f) ||
+    (cp >= 0x007f && cp <= 0x009f) ||
+    (cp >= 0x0300 && cp <= 0x036f) || // combining diacritical marks
+    (cp >= 0x200b && cp <= 0x200f) || // zero-width space/joiners, LTR/RTL marks
+    cp === 0xfeff || // zero-width no-break space / BOM
+    (cp >= 0xfe00 && cp <= 0xfe0f) || // variation selectors
+    (cp >= 0x20d0 && cp <= 0x20ff) || // combining marks for symbols
+    (cp >= 0x1f3fb && cp <= 0x1f3ff) // emoji skin-tone modifiers
+  ) {
+    return 0;
+  }
+  if (
+    (cp >= 0x1100 && cp <= 0x115f) || // Hangul Jamo
+    (cp >= 0x2e80 && cp <= 0x303e) || // CJK radicals, Kangxi, CJK punctuation
+    (cp >= 0x3041 && cp <= 0x33ff) || // Hiragana, Katakana, CJK compat, enclosed CJK
+    (cp >= 0x3400 && cp <= 0x4dbf) || // CJK Unified Ideographs Extension A
+    (cp >= 0x4e00 && cp <= 0x9fff) || // CJK Unified Ideographs
+    (cp >= 0xa000 && cp <= 0xa4cf) || // Yi
+    (cp >= 0xac00 && cp <= 0xd7a3) || // Hangul syllables
+    (cp >= 0xf900 && cp <= 0xfaff) || // CJK compatibility ideographs
+    (cp >= 0xfe30 && cp <= 0xfe4f) || // CJK compatibility forms
+    (cp >= 0xff00 && cp <= 0xff60) || // Fullwidth forms
+    (cp >= 0xffe0 && cp <= 0xffe6) || // Fullwidth signs
+    (cp >= 0x1f300 && cp <= 0x1f64f) || // emoji: symbols/pictographs, emoticons
+    (cp >= 0x1f680 && cp <= 0x1f6ff) || // transport/map symbols
+    (cp >= 0x1f900 && cp <= 0x1f9ff) || // supplemental symbols/pictographs
+    (cp >= 0x20000 && cp <= 0x3fffd) // CJK unified ideographs, supplementary planes
+  ) {
+    return 2;
+  }
+  return 1;
+}
+
+/** Total terminal display width of `text`, iterating by code point (not UTF-16 unit). */
+export function displayWidth(text: string): number {
+  let width = 0;
+  for (const char of text) {
+    width += codePointWidth(char.codePointAt(0) ?? 0);
+  }
+  return width;
+}
+
+/** Right-pad `text` with spaces until its DISPLAY width reaches `target` (never cuts). */
+export function padEndDisplay(text: string, target: number): string {
+  const pad = target - displayWidth(text);
+  return pad > 0 ? text + " ".repeat(pad) : text;
+}
+
+/**
+ * Cut `text` to `max` display columns, marking the cut with a single ellipsis
  * character so a truncated path stays visually distinguishable from a real one.
  */
 export function truncate(text: string, max: number): string {
   if (max <= 0) {
     return "";
   }
-  if (text.length <= max) {
+  if (displayWidth(text) <= max) {
     return text;
   }
-  return text.slice(0, max - 1) + "…";
+  const budget = max - 1; // reserve one column for the ellipsis
+  let width = 0;
+  let result = "";
+  for (const char of text) {
+    const w = codePointWidth(char.codePointAt(0) ?? 0);
+    if (width + w > budget) break;
+    result += char;
+    width += w;
+  }
+  return result + "…";
 }
