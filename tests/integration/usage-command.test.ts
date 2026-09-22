@@ -84,14 +84,16 @@ describe("usageCommand happy path (specs/usage.md)", () => {
 
     expect(code).toBe(0);
     const text = out.text();
-    expect(text).toContain("Z.ai Coding Plan (level: lite)");
+    expect(text).toContain("Z.AI CODING PLAN  /  lite");
     expect(text).toContain("5-hour window");
     expect(text).toContain("912 / 2000 credits (45%)");
+    expect(text).toContain("45% used");
+    expect(text).toContain("1087 remaining");
     expect(text).toContain("weekly");
     expect(text).toContain("3304 / 10000 credits (33%)");
     expect(text).toContain("resets 2026-09-18T"); // ISO from nextResetTime 1789715562684
-    expect(text).toContain("Claude quota   not available");
-    expect(text).toContain("Codex usage    not available");
+    expect(text).toContain("not available — Claude Code exposes no headless usage API");
+    expect(text).toContain("not available — Codex exposes no plan-usage API");
     expect(text).toContain("(none yet");
     expect(text).not.toContain("test-key");
   });
@@ -170,7 +172,11 @@ describe("usageCommand local aggregation (specs/usage.md)", () => {
 
     expect(code).toBe(0);
     const text = out.text();
-    expect(text).toContain("runs 3 · tokens 7055 in / 2240 out · last 2026-09-18T03:00:00.000Z");
+    expect(text).toContain("LOCAL BENCHMARKS");
+    expect(text).toContain("Runs");
+    expect(text).toContain("3");
+    expect(text).toContain("7055 in / 2240 out");
+    expect(text).toContain("2026-09-18T03:00:00.000Z");
   });
 });
 
@@ -181,7 +187,7 @@ describe("usageCommand failures (specs/usage.md)", () => {
     ).rejects.toMatchObject({ codeName: "ZAI_KEY_MISSING", exitCode: 10 });
   });
 
-  it("network failure renders ✗ with the reason and exits 1", async () => {
+  it("network failure renders [FAIL] with the reason and exits 1", async () => {
     const out = captureStdout();
     const failing = (async () => {
       throw new TypeError("fetch failed");
@@ -190,11 +196,11 @@ describe("usageCommand failures (specs/usage.md)", () => {
     const code = await usageCommand({}, baseDeps({ fetchImpl: failing }));
 
     expect(code).toBe(1);
-    expect(out.text()).toContain("✗");
+    expect(out.text()).toContain("[FAIL]");
     expect(out.text()).toContain("unreachable");
   });
 
-  it("HTTP error and code !== 200 render ✗ and exit 1", async () => {
+  it("HTTP error and code !== 200 render [FAIL] and exit 1", async () => {
     const http = captureStdout();
     const codeHttp = await usageCommand(
       {},
@@ -214,7 +220,7 @@ describe("usageCommand failures (specs/usage.md)", () => {
     expect(apiCode.text()).toContain("code 401");
   });
 
-  it("non-JSON body renders ✗ and exits 1", async () => {
+  it("non-JSON body renders [FAIL] and exits 1", async () => {
     const out = captureStdout();
     const code = await usageCommand(
       {},

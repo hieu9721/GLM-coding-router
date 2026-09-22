@@ -264,21 +264,22 @@ verdict precedence, pure/unit-tested), `src/commands/doctor-command.ts` (rewritt
 `--offline`/`--network`, new JSON fields), `src/tui/command-ui.ts` (UI foundation),
 `src/commands/landing.ts` (root landing page), `src/cli.ts` wiring, `src/tui/render.ts`
 (`TERM=dumb` now honored — a real pre-existing gap found and fixed while building this).
-`status`/`usage` got targeted, safe changes (wording, quota bars) but not the full box/section
-UI — deliberately conservative to avoid rewriting their already-pinned output contracts in the
-same pass as the doctor rewrite. 646 tests pass (up from 557), build+lint clean.
+`status` and `usage` now also use the full `command-ui` header/section/row hierarchy
+(2026-09-22, follow-up pass) — JSON output for both is byte-identical to before; only the
+text renderer changed, verified live against the real Z.ai monitor endpoint. 647 tests pass
+(up from 557), build+lint clean.
 
-Not done: full `command-ui` hierarchy applied to `status`/`usage` screens; `--help` intro styling;
-wide-character (CJK/emoji) display-width handling in `command-ui.ts` (current width math is
-`string.length`, not display cells — spec explicitly calls this out and it was not addressed);
-the formal manual PowerShell 5.1 / PowerShell 7 / CMD acceptance pass (only exercised via the
-built CLI in this Git Bash / PowerShell 7 dev environment).
+Not done: `--help` intro styling (left as Commander's stock output); wide-character (CJK/emoji)
+display-width handling in `command-ui.ts` (current width math is `string.length`, not display
+cells — spec explicitly calls this out and it was not addressed); the formal manual
+PowerShell 5.1 / PowerShell 7 / CMD acceptance pass (only exercised via the built CLI in this
+Git Bash / PowerShell 7 dev environment, including one live, real (non-mocked) `usage` call).
 
 ## Acceptance criteria
 
 - [x] Full Commander help and commands remain reachable; landing is offline (verified live).
-- [ ] Four management screens share the proposed hierarchy and actionable hints — landing +
-      doctor yes; status/usage partial (see note above).
+- [x] Four management screens (landing, doctor, status, usage) share the proposed
+      header/section/row hierarchy and actionable hints.
 - [ ] Width 24/40/80/120 and long paths pass (unit-tested); wide characters do not — known gap.
 - [x] NO_COLOR, TERM=dumb, pipes, quiet and JSON behave as specified (incl. the TERM=dumb fix).
 - [x] Doctor authenticates the exact effective key once per invocation, uncached.

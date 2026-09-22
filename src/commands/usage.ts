@@ -9,13 +9,14 @@ import { describeWindow, fetchZaiQuota } from "../core/zai-quota.js";
 import type { ZaiQuotaData } from "../core/zai-quota.js";
 import { emitJson, type GlobalOptions } from "./context.js";
 import { createCommandUi } from "../tui/command-ui.js";
-import { createWriter } from "../tui/render.js";
+import { createWriter, type Writer } from "../tui/render.js";
 
 export interface UsageDeps {
   readonly home?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly readUserEnv?: (name: string) => string | undefined;
   readonly fetchImpl?: typeof fetch;
+  readonly stdout?: NodeJS.WriteStream;
 }
 
 interface LocalUsage {
@@ -109,16 +110,22 @@ export async function usageCommand(options: GlobalOptions, deps: UsageDeps = {})
     return quotaError ? 1 : 0;
   }
 
-  const ui = createCommandUi(createWriter(process.stdout));
-  const lines: string[] = [`GLM Coding Router v${version} — usage snapshot`, ""];
+  const stream = deps.stdout ?? process.stdout;
+  const writer: Writer = createWriter(stream);
+  const ui = createCommandUi(writer, { quiet: options.quiet });
+
+  const blocks: string[] = [];
+  const header = ui.header(`GLM CODING ROUTER  v${version}  /  USAGE`, "Coding Plan quota snapshot");
+  if (header) blocks.push(header);
+
+  const quotaRows: string[] = [
+    ui.section(`Z.AI CODING PLAN${quota?.level ? `  /  ${quota.level}` : ""}`),
+  ];
   if (quotaError) {
-    lines.push(`Z.ai Coding Plan`);
-    lines.push(`  ✗ ${quotaError}`);
+    quotaRows.push(ui.row("Z.ai Coding Plan", quotaError, "fail"));
+  } else if (limits.length === 0) {
+    quotaRows.push(ui.detail("(no quota windows reported)"));
   } else {
-    lines.push(`Z.ai Coding Plan${quota?.level ? ` (level: ${quota.level})` : ""}`);
-    if (limits.length === 0) {
-      lines.push("  (no quota windows reported)");
-    }
     for (const limit of limits) {
       const consumed = limit.currentValue ?? "?";
       const total = limit.usage ?? "?";
@@ -133,23 +140,27 @@ export async function usageCommand(options: GlobalOptions, deps: UsageDeps = {})
       const percentage = percentNumeric ?? "?";
       const resets =
         typeof limit.nextResetTime === "number" ? ` — resets ${new Date(limit.nextResetTime).toISOString()}` : "";
-      lines.push(`  ${describeWindow(limit).padEnd(15)} ${consumed} / ${total} credits (${percentage}%)${resets}`);
+      quotaRows.push(ui.row(describeWindow(limit), `${consumed} / ${total} credits (${percentage}%)${resets}`));
       const remaining = typeof limit.remaining === "number" ? `${limit.remaining} remaining` : "remaining unknown";
-      lines.push(`    ${ui.bar(percentNumeric)} · ${remaining}`);
+      quotaRows.push(ui.detail(`${ui.bar(percentNumeric)} · ${remaining}`));
     }
   }
-  lines.push("");
-  lines.push("Local (benchmark reports)");
+  blocks.push(quotaRows.join("\n"));
+
+  const benchmarkRows: string[] = [ui.section("LOCAL BENCHMARKS")];
   if (local.runs === 0) {
-    lines.push("  (none yet — run glm-router benchmark)");
+    benchmarkRows.push(ui.detail("(none yet — run glm-router benchmark)"));
   } else {
-    lines.push(
-      `  runs ${local.runs} · tokens ${local.tokensIn} in / ${local.tokensOut} out · last ${local.lastFinishedAt}`,
-    );
+    benchmarkRows.push(ui.row("Runs", String(local.runs)));
+    benchmarkRows.push(ui.row("Tokens", `${local.tokensIn} in / ${local.tokensOut} out`));
+    benchmarkRows.push(ui.row("Last run", String(local.lastFinishedAt)));
   }
-  lines.push("");
-  lines.push(`Claude quota   ${json.claude}`);
-  lines.push(`Codex usage    ${json.codex}`);
-  process.stdout.write(lines.join("\n") + "\n");
+  blocks.push(benchmarkRows.join("\n"));
+
+  blocks.push(
+    [ui.section("OTHER PROVIDERS"), ui.row("Claude", json.claude), ui.row("Codex", json.codex)].join("\n"),
+  );
+
+  writer.line(blocks.join("\n\n"));
   return quotaError ? 1 : 0;
 }

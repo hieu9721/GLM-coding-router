@@ -89,10 +89,32 @@ describe("statusCommand (spec §41: quick, fully offline)", () => {
 
     expect(code).toBe(0);
     const text = out.text();
-    expect(text).toContain("Z.ai key        not configured");
-    expect(text).toContain("Claude          missing");
-    expect(text).toContain("Codex           missing");
-    expect(text).toContain("Main model      glm-5.3");
+    expect(text).toContain("SYSTEM");
+    expect(text).toContain("Z.ai key");
+    expect(text).toContain("not configured");
+    expect(text).toContain("[FAIL]");
+    expect(text).toContain("Claude");
+    expect(text).toContain("missing");
+    expect(text).toContain("Codex");
+    expect(text).toContain("[WARN]");
+    expect(text).toContain("MODELS");
+    expect(text).toContain("Main model");
+    expect(text).toContain("glm-5.3");
+  });
+
+  it("never claims a configured key is valid — points to doctor instead", () => {
+    const home = temp();
+    const dir = temp();
+    const out = captureStdout();
+
+    const code = statusCommand({}, { home, env: isolatedEnv([dir], { ZAI_API_KEY: "test-key" }), readUserEnv: () => undefined });
+
+    expect(code).toBe(0);
+    const text = out.text();
+    expect(text).toContain("configured");
+    expect(text).toContain("not verified");
+    expect(text).toContain("glm-router doctor");
+    expect(text).not.toMatch(/configured\s*$/m);
   });
 
   it("never makes a network request or prints the key value", () => {
@@ -108,24 +130,19 @@ describe("statusCommand (spec §41: quick, fully offline)", () => {
     expect(out.text()).not.toContain("super-secret-value");
   });
 
-  it("aligns every label/value pair to the same column (spec §41)", () => {
+  it("shows a skill row per agent and keeps every line within the default 80-column width", () => {
     const home = temp();
     const emptyPath = temp();
     const out = captureStdout();
 
     statusCommand({}, { home, env: isolatedEnv([emptyPath]), readUserEnv: () => undefined });
+    const text = out.text();
 
-    const checked = out
-      .text()
-      .split("\n")
-      .filter((line) => /^(\S.*?)\s{2,}(\S.*)$/.test(line));
-    expect(checked.some((line) => line.startsWith("Claude skill"))).toBe(true);
-    expect(checked.some((line) => line.startsWith("Codex skill"))).toBe(true);
-
-    const columns = checked.map((line) => {
-      const [, , value] = line.match(/^(\S.*?)\s{2,}(\S.*)$/)!;
-      return line.indexOf(value);
-    });
-    expect([...new Set(columns)]).toEqual([16]);
+    expect(text).toContain("Claude skill");
+    expect(text).toContain("Codex skill");
+    for (const line of text.split("\n")) {
+      const visible = line.replace(/\[[0-9;]*m/g, "");
+      expect(visible.length).toBeLessThanOrEqual(80);
+    }
   });
 });
